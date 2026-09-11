@@ -12,12 +12,16 @@ skill descriptions (shown on hover), and portrait image paths. The running app h
 At **runtime** a player can only:
 
 - **Assign attributes** — raise or lower an attribute's value with its stepper.
-  That value is the number of base pips available to every skill in the row.
-- **Assign skill points** — add points to a single card with its `−` / `+`.
-  Extra points show as white pips on top of the attribute-coloured ones.
+  That value is the number of pip *slots* every skill in the row has.
+- **Assign skill points** — with a card's `−` / `+`, *fill* that skill's slots.
+  Points never add pips beyond the attribute; they can only fill what the
+  attribute provides (filled pips are solid, unfilled are hollow).
 
-Those assignments (and nothing else) are saved to `localStorage`. **Export build**
-/ **Import build** / **Reset** operate only on that set of numbers.
+Those assignments (and nothing else) are saved to `localStorage`.
+
+- **Export image** renders the whole board to a PNG (needs the page served over
+  http, see below).
+- **Export JSON** / **Import JSON** / **Reset** operate on the build numbers only.
 
 ## Editing content (dev-side)
 
@@ -41,6 +45,11 @@ Static site, no build step, no dependencies:
 python3 -m http.server 8000
 # then open http://localhost:8000
 ```
+
+Serve it over http (a local server or the deployed URL) rather than opening
+`index.html` off disk. **Export image** draws the portraits onto a canvas, and
+browsers taint that canvas when the page is a `file://` URL, which blocks the PNG.
+Over http the portraits are same-origin and export works.
 
 ## Files
 

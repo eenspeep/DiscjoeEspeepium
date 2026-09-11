@@ -17,8 +17,9 @@
       <h1 class="wordmark">Skill&nbsp;Builder</h1>
       <p class="tagline">Assemble the voices in your head.</p>
       <div class="topbar-actions">
-        <button id="exportBtn" class="btn">Export build</button>
-        <button id="importBtn" class="btn">Import build</button>
+        <button id="exportImgBtn" class="btn">Export image</button>
+        <button id="exportBtn" class="btn">Export JSON</button>
+        <button id="importBtn" class="btn">Import JSON</button>
         <button id="resetBtn" class="btn">Reset</button>
         <input type="file" id="importFile" accept="application/json" hidden />
       </div>
@@ -28,9 +29,10 @@
   <main class="board" id="board" aria-live="polite"></main>
 
   <p class="hint">
-    Raise an attribute to add pips to every skill in its row. Assign skill points
-    to a single card with its &minus;&nbsp;/&nbsp;+. Hover a card for its description.
-    Names, portraits, and descriptions are set in <code>data.js</code>.
+    An attribute sets how many pip slots every skill in its row has. Assign skill
+    points with a card's &minus;&nbsp;/&nbsp;+ to fill those slots (never past the
+    attribute). Hover a card for its description. Names, portraits, and descriptions
+    are set in <code>data.js</code>.
   </p>
 
   <!-- shared hover tooltip, positioned by script -->
