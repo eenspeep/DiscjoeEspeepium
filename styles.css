@@ -112,6 +112,55 @@ html, body {
 .btn:hover { border-color: var(--gold-soft); background: var(--panel); }
 .btn:active { transform: translateY(1px); }
 
+/* ---------- budget meters ---------- */
+.budgets {
+  position: relative;
+  z-index: 2;
+  max-width: 1180px;
+  margin: 16px auto 0;
+  padding: 0 24px;
+  display: flex;
+  gap: 28px;
+  flex-wrap: wrap;
+}
+.meter {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1 1 320px;
+  min-width: 260px;
+}
+.meter-label {
+  font-family: var(--sans);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  font-size: 0.74rem;
+  color: var(--ink-dim);
+  white-space: nowrap;
+}
+.meter-bar {
+  flex: 1;
+  height: 8px;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.meter-fill {
+  height: 100%;
+  background: var(--gold);
+  transition: width .15s ease;
+}
+.meter.full .meter-fill { background: var(--physique); }
+.meter-num {
+  font-family: var(--sans);
+  font-size: 0.74rem;
+  letter-spacing: 0.05em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.meter.full .meter-num { color: var(--physique); }
+
 /* ---------- board / attribute rows ---------- */
 .board {
   position: relative;

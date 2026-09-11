@@ -17,17 +17,23 @@
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "skillbuilder.build.v1";
-  const ATTR_VALUE_MIN = 1;
-  const ATTR_VALUE_MAX = 8;
-  const BONUS_MIN = 0;
-  const BONUS_MAX = 8;
+  const STORAGE_KEY = "skillbuilder.build.v2";
 
   const DATA = window.SKILL_DATA;
   if (!DATA || !Array.isArray(DATA.attributes)) {
     document.getElementById("board").textContent = "data.js failed to load.";
     return;
   }
+
+  // character-creation limits (see data.js -> limits)
+  const LIMITS = Object.assign(
+    { attrMin: 1, attrMax: 6, attrBudget: 12, skillPointBudget: 20 },
+    DATA.limits || {}
+  );
+  const ATTR_VALUE_MIN = LIMITS.attrMin;
+  const ATTR_VALUE_MAX = LIMITS.attrMax;
+  const BONUS_MIN = 0;
+  const BONUS_MAX = LIMITS.attrMax; // a single skill can't be filled past the attribute cap
 
   const $ = (sel) => document.querySelector(sel);
   const board = $("#board");
@@ -93,10 +99,51 @@
   // filled pips can never exceed the attribute's slot count
   const filledPips = (slot, i) => Math.min(skillPoints(slot, i), attrValue(slot));
 
+  // budgets: how many points are spent across the whole sheet
+  const attrPointsUsed = () =>
+    DATA.attributes.reduce((sum, a) => sum + attrValue(a.slot), 0);
+  const skillPointsUsed = () =>
+    DATA.attributes.reduce((sum, a) =>
+      sum + a.skills.reduce((t, _, i) => t + filledPips(a.slot, i), 0), 0);
+  const attrPointsLeft = () => LIMITS.attrBudget - attrPointsUsed();
+  const skillPointsLeft = () => LIMITS.skillPointBudget - skillPointsUsed();
+
   /* ---------- rendering ---------- */
   function render() {
+    renderBudgets();
     board.innerHTML = "";
     for (const attr of DATA.attributes) board.appendChild(rowEl(attr));
+  }
+
+  function renderBudgets() {
+    const el = $("#budgets");
+    el.innerHTML = "";
+    el.appendChild(meterEl("Attribute points", attrPointsUsed(), LIMITS.attrBudget));
+    el.appendChild(meterEl("Skill points", skillPointsUsed(), LIMITS.skillPointBudget));
+  }
+
+  function meterEl(label, used, total) {
+    const full = used >= total;
+    const wrap = document.createElement("div");
+    wrap.className = "meter" + (full ? " full" : "");
+
+    const name = document.createElement("span");
+    name.className = "meter-label";
+    name.textContent = label;
+
+    const bar = document.createElement("div");
+    bar.className = "meter-bar";
+    const fill = document.createElement("div");
+    fill.className = "meter-fill";
+    fill.style.width = (total ? Math.min(100, (used / total) * 100) : 0) + "%";
+    bar.appendChild(fill);
+
+    const num = document.createElement("span");
+    num.className = "meter-num";
+    num.textContent = `${used} / ${total} spent`;
+
+    wrap.append(name, bar, num);
+    return wrap;
   }
 
   function rowEl(attr) {
@@ -118,7 +165,7 @@
     val.textContent = attrValue(attr.slot);
     const plus = stepEl("+", () => bumpAttr(attr.slot, +1));
     minus.disabled = attrValue(attr.slot) <= ATTR_VALUE_MIN;
-    plus.disabled = attrValue(attr.slot) >= ATTR_VALUE_MAX;
+    plus.disabled = attrValue(attr.slot) >= ATTR_VALUE_MAX || attrPointsLeft() <= 0;
     stepper.append(minus, val, plus);
 
     const caption = document.createElement("span");
@@ -145,6 +192,7 @@
   }
 
   function bumpAttr(slot, dir) {
+    if (dir > 0 && attrPointsLeft() <= 0) return; // out of attribute points
     const slots = clamp(attrValue(slot) + dir, ATTR_VALUE_MIN, ATTR_VALUE_MAX);
     build.values[slot] = slots;
     // fewer slots means any skill filled past the new count is trimmed to fit
@@ -161,6 +209,7 @@
   }
 
   function bumpSkill(slot, i, dir) {
+    if (dir > 0 && skillPointsLeft() <= 0) return; // out of skill points
     const k = skillKey(slot, i);
     // points fill existing slots, so they cap at the attribute value
     const next = clamp(filledPips(slot, i) + dir, BONUS_MIN, attrValue(slot));
@@ -207,7 +256,7 @@
     label.textContent = `${filled}/${slots}`;
     const plus = stepEl("+", () => bumpSkill(attr.slot, i, +1));
     minus.disabled = filled <= BONUS_MIN;
-    plus.disabled = filled >= slots;
+    plus.disabled = filled >= slots || skillPointsLeft() <= 0;
     assign.append(minus, label, plus);
 
     card.append(frame, meta, assign);
@@ -313,9 +362,18 @@
     );
 
     ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "left";
     ctx.fillStyle = "#c8a45c";
     ctx.font = "600 40px Oswald, sans-serif";
     ctx.fillText("SKILL BUILDER", PAD, PAD + 40);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#a49b86";
+    ctx.font = "500 18px Oswald, sans-serif";
+    ctx.fillText(
+      `Attributes ${attrPointsUsed()}/${LIMITS.attrBudget}   ·   ` +
+      `Skills ${skillPointsUsed()}/${LIMITS.skillPointBudget}`,
+      width - PAD, PAD + 36
+    );
 
     let y = PAD + TITLE_H;
     for (const attr of DATA.attributes) {

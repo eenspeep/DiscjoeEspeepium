@@ -22,6 +22,17 @@
    ============================================================ */
 
 window.SKILL_DATA = {
+  // ── Character-creation limits (Disco Elysium style) ──
+  // attrMax / attrBudget are the canonical DE caps. skillPointBudget is a
+  // finite pool for filling skill pips; DE ties this to level-up XP rather
+  // than a fixed number, so set it to whatever feels right for your game.
+  limits: {
+    attrMin: 1,             // an attribute can never drop below this
+    attrMax: 6,             // DE caps every attribute at 6
+    attrBudget: 12,         // total points shared across the four attributes
+    skillPointBudget: 20,   // total points available to fill skill pips
+  },
+
   attributes: [
     {
       slot: "intellect",

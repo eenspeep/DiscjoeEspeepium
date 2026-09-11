@@ -17,6 +17,17 @@ At **runtime** a player can only:
   Points never add pips beyond the attribute; they can only fill what the
   attribute provides (filled pips are solid, unfilled are hollow).
 
+Both are bounded by a **fixed point budget** (shown as meters at the top), so a
+character cannot max everything:
+
+- **Attribute points** — total shared across the four attributes, each capped at
+  6. Mirrors Disco Elysium's creation pool (12 points, max 6 per attribute).
+- **Skill points** — a finite pool for filling pips. DE ties this to level-up XP
+  rather than a fixed number, so it is a tunable value.
+
+Both budgets, the per-attribute cap, and the minimum live in `data.js` under
+`limits`.
+
 Those assignments (and nothing else) are saved to `localStorage`.
 
 - **Export image** renders the whole board to a PNG (needs the page served over
