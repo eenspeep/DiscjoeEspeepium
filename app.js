@@ -1,33 +1,48 @@
 /* ============================================================
    Skill Builder - state, rendering, and the portrait pipeline
+
+   Model mirrors Disco Elysium: four attributes, each with an
+   editable name and a value. An attribute's value is the number
+   of base pips available to every skill in its row. A skill may
+   carry its own extra points on top of that base.
    ============================================================ */
 
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "skillbuilder.skills.v1";
+  const STORAGE_KEY = "skillbuilder.state.v2";
   const PORTRAIT_W = 150;
   const PORTRAIT_H = 200;
-  const ATTRS = ["intellect", "psyche", "physique", "motorics"];
+  const ATTR_VALUE_MIN = 1;
+  const ATTR_VALUE_MAX = 8;
+  const BONUS_MAX = 8;
+
+  // Fixed attribute slots (colour + default name). Names are editable.
+  const SLOTS = [
+    { slot: "intellect", name: "Intellect" },
+    { slot: "psyche", name: "Psyche" },
+    { slot: "physique", name: "Physique" },
+    { slot: "motorics", name: "Motorics" },
+  ];
 
   /* ---------- state ---------- */
-  let skills = load();
-  let editingId = null;      // null while creating a new skill
-  let draftPortrait = null;  // data URL held by the open editor
+  let state = load();
+  let editingId = null;       // null while creating a new skill
+  let editingAttrId = null;   // which attribute a new skill lands in
+  let draftPortrait = null;
 
   /* ---------- element refs ---------- */
   const $ = (sel) => document.querySelector(sel);
-  const grid = $("#grid");
-  const emptyState = $("#emptyState");
-  const filters = $("#filters");
+  const board = $("#board");
 
   const editor = $("#editor");
   const editorTitle = $("#editorTitle");
   const form = $("#skillForm");
   const nameInput = $("#skillName");
   const attrSelect = $("#skillAttr");
-  const levelInput = $("#skillLevel");
-  const levelValue = $("#levelValue");
+  const bonusInput = $("#skillBonus");
+  const bonusValue = $("#bonusValue");
+  const pipHint = $("#pipHint");
   const descInput = $("#skillDesc");
 
   const portraitFrame = $("#portraitFrame");
@@ -38,126 +53,238 @@
 
   const importFile = $("#importFile");
 
-  let activeFilter = "all";
-
   /* ---------- persistence ---------- */
+  function defaultState() {
+    const attributes = SLOTS.map((s) => ({
+      id: uid("at"),
+      slot: s.slot,
+      name: s.name,
+      value: 3,
+    }));
+    const byName = (n) => attributes.find((a) => a.slot === n).id;
+    const skills = [
+      { id: uid(), attrId: byName("intellect"), name: "Encyclopedia", bonus: 0,
+        desc: "A head full of trivia, some of it even useful.", portrait: null },
+      { id: uid(), attrId: byName("psyche"), name: "Inland Empire", bonus: 1,
+        desc: "Hunches and gut feelings. Dreams. The dread that follows you.", portrait: null },
+      { id: uid(), attrId: byName("physique"), name: "Electrochemistry", bonus: 2,
+        desc: "Go on. One more. It will feel so good.", portrait: null },
+      { id: uid(), attrId: byName("motorics"), name: "Savoir Faire", bonus: 0,
+        desc: "Slip in, slip out. Be the smoothest thing in the room.", portrait: null },
+    ];
+    return { attributes, skills };
+  }
+
   function load() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : [];
-      return Array.isArray(parsed) ? parsed.filter(isValidSkill) : [];
+      if (!raw) return defaultState();
+      const parsed = JSON.parse(raw);
+      if (!parsed || !Array.isArray(parsed.attributes) || !Array.isArray(parsed.skills)) {
+        return defaultState();
+      }
+      return parsed;
     } catch (err) {
-      console.warn("Could not read saved skills:", err);
-      return [];
+      console.warn("Could not read saved state:", err);
+      return defaultState();
     }
   }
 
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(skills));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
     } catch (err) {
-      // Most likely the quota was blown by too many portraits.
-      alert("Could not save. Browser storage is full or blocked. Export your skills to keep them.");
+      alert("Could not save. Browser storage is full or blocked. Export to keep your work.");
       console.warn(err);
     }
   }
 
-  function isValidSkill(s) {
-    return s && typeof s.id === "string" && typeof s.name === "string";
+  function uid(prefix) {
+    return (prefix || "sk") + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
   }
 
-  function uid() {
-    return "sk_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  }
+  const attrById = (id) => state.attributes.find((a) => a.id === id);
+  const skillById = (id) => state.skills.find((s) => s.id === id);
+  const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+  const effectivePips = (skill) => {
+    const attr = attrById(skill.attrId);
+    return (attr ? attr.value : 0) + (skill.bonus || 0);
+  };
 
   /* ---------- rendering ---------- */
   function render() {
-    const list = activeFilter === "all"
-      ? skills
-      : skills.filter((s) => s.attr === activeFilter);
-
-    grid.innerHTML = "";
-    emptyState.hidden = skills.length !== 0;
-
-    for (const skill of list) {
-      grid.appendChild(cardEl(skill));
+    board.innerHTML = "";
+    for (const attr of state.attributes) {
+      board.appendChild(rowEl(attr));
     }
   }
 
-  function cardEl(skill) {
-    const attr = ATTRS.includes(skill.attr) ? skill.attr : "intellect";
+  function rowEl(attr) {
+    const row = document.createElement("section");
+    row.className = `attr-row attr-${attr.slot}`;
+    row.dataset.attrId = attr.id;
+
+    /* header: editable name, value stepper, add button */
+    const head = document.createElement("header");
+    head.className = "attr-head";
+
+    const nameField = document.createElement("input");
+    nameField.className = "attr-name";
+    nameField.value = attr.name;
+    nameField.maxLength = 24;
+    nameField.setAttribute("aria-label", "Attribute name");
+    nameField.addEventListener("change", () => {
+      attr.name = nameField.value.trim() || "Attribute";
+      nameField.value = attr.name;
+      save();
+    });
+    // autosize-ish: keep width tied to content. The uppercase Oswald face
+    // with letter-spacing runs ~1.4ch per glyph, so estimate generously.
+    const sizeName = (v) => {
+      nameField.style.width = Math.ceil(Math.max(5, v.length) * 1.4 + 2) + "ch";
+    };
+    sizeName(attr.name);
+    nameField.addEventListener("input", () => sizeName(nameField.value));
+
+    const stepper = document.createElement("div");
+    stepper.className = "stepper";
+    const minus = stepEl("−", () => setAttrValue(attr, attr.value - 1));
+    const val = document.createElement("span");
+    val.className = "val";
+    val.textContent = attr.value;
+    const plus = stepEl("+", () => setAttrValue(attr, attr.value + 1));
+    minus.disabled = attr.value <= ATTR_VALUE_MIN;
+    plus.disabled = attr.value >= ATTR_VALUE_MAX;
+    stepper.append(minus, val, plus);
+
+    const caption = document.createElement("span");
+    caption.className = "caption";
+    caption.textContent = "pips per skill";
+
+    const addBtn = document.createElement("button");
+    addBtn.className = "btn btn-sm add-skill";
+    addBtn.textContent = "+ Skill";
+    addBtn.addEventListener("click", () => openEditor(null, attr.id));
+
+    head.append(nameField, stepper, caption, addBtn);
+
+    /* cards */
+    const cards = document.createElement("div");
+    cards.className = "row-cards";
+    const rowSkills = state.skills.filter((s) => s.attrId === attr.id);
+
+    for (const skill of rowSkills) cards.appendChild(cardEl(skill, attr));
+
+    const addCard = document.createElement("button");
+    addCard.className = "card-add";
+    addCard.innerHTML = "<span>+ Add skill</span>";
+    addCard.addEventListener("click", () => openEditor(null, attr.id));
+    cards.appendChild(addCard);
+
+    row.append(head, cards);
+    return row;
+  }
+
+  function stepEl(label, onClick) {
+    const b = document.createElement("button");
+    b.className = "step";
+    b.textContent = label;
+    b.addEventListener("click", onClick);
+    return b;
+  }
+
+  function setAttrValue(attr, next) {
+    attr.value = clamp(next, ATTR_VALUE_MIN, ATTR_VALUE_MAX);
+    save();
+    render();
+  }
+
+  function cardEl(skill, attr) {
     const card = document.createElement("article");
-    card.className = `card attr-${attr}`;
+    card.className = "card";
     card.dataset.id = skill.id;
 
     const frame = document.createElement("div");
-    frame.className = "card-portrait-frame";
+    frame.className = "frame";
     if (skill.portrait) {
       const img = document.createElement("img");
       img.src = skill.portrait;
       img.alt = skill.name;
       frame.appendChild(img);
-    } else {
-      const ph = document.createElement("div");
-      ph.className = "portrait-placeholder";
-      ph.innerHTML = `<span>${initials(skill.name)}</span>`;
-      frame.appendChild(ph);
     }
 
-    const level = document.createElement("div");
-    level.className = "card-level";
-    level.textContent = skill.level;
-    level.title = "Skill level";
+    const meta = document.createElement("div");
+    meta.className = "card-meta";
 
     const name = document.createElement("h3");
     name.className = "card-name";
     name.textContent = skill.name;
 
-    const attrLabel = document.createElement("p");
-    attrLabel.className = "card-attr";
-    attrLabel.textContent = attr;
+    meta.append(name, pipsEl(attr.value, skill.bonus || 0));
 
     const desc = document.createElement("p");
     desc.className = "card-desc";
-    desc.textContent = skill.desc || "—";
+    desc.textContent = skill.desc || "";
 
     const actions = document.createElement("div");
     actions.className = "card-actions";
     const editBtn = document.createElement("button");
-    editBtn.className = "btn";
+    editBtn.className = "btn btn-sm";
     editBtn.textContent = "Edit";
     editBtn.addEventListener("click", () => openEditor(skill.id));
     const delBtn = document.createElement("button");
-    delBtn.className = "btn";
+    delBtn.className = "btn btn-sm";
     delBtn.textContent = "Delete";
     delBtn.addEventListener("click", () => removeSkill(skill.id));
     actions.append(editBtn, delBtn);
 
-    card.append(frame, level, name, attrLabel, desc, actions);
+    card.append(frame, meta, desc, actions);
     return card;
   }
 
-  function initials(name) {
-    return (name || "?")
-      .split(/\s+/)
-      .map((w) => w[0])
-      .join("")
-      .slice(0, 3)
-      .toUpperCase();
+  function pipsEl(base, bonus) {
+    const wrap = document.createElement("div");
+    wrap.className = "pips";
+    const total = base + bonus;
+    wrap.title = bonus
+      ? `${total} pips (${base} from attribute, +${bonus})`
+      : `${total} pips`;
+    for (let i = 0; i < total; i++) {
+      const p = document.createElement("span");
+      p.className = i >= base ? "pip bonus" : "pip";
+      wrap.appendChild(p);
+    }
+    const count = document.createElement("span");
+    count.className = "pip-count";
+    count.textContent = total;
+    wrap.appendChild(count);
+    return wrap;
   }
 
   /* ---------- editor ---------- */
-  function openEditor(id) {
+  function populateAttrSelect(selectedId) {
+    attrSelect.innerHTML = "";
+    for (const attr of state.attributes) {
+      const opt = document.createElement("option");
+      opt.value = attr.id;
+      opt.textContent = attr.name;
+      attrSelect.appendChild(opt);
+    }
+    attrSelect.value = selectedId || state.attributes[0].id;
+  }
+
+  function openEditor(id, attrId) {
     editingId = id || null;
-    const skill = id ? skills.find((s) => s.id === id) : null;
+    const skill = id ? skillById(id) : null;
+    editingAttrId = skill ? skill.attrId : (attrId || state.attributes[0].id);
 
     editorTitle.textContent = skill ? "Edit Skill" : "New Skill";
+    populateAttrSelect(editingAttrId);
     nameInput.value = skill ? skill.name : "";
-    attrSelect.value = skill ? skill.attr : "intellect";
-    levelInput.value = skill ? skill.level : 3;
-    levelValue.textContent = levelInput.value;
+    bonusInput.value = skill ? (skill.bonus || 0) : 0;
     descInput.value = skill ? skill.desc : "";
     setDraftPortrait(skill ? skill.portrait : null);
+    updateBonusHint();
     applyEditorAccent();
 
     editor.hidden = false;
@@ -171,6 +298,16 @@
     editingId = null;
     draftPortrait = null;
     form.reset();
+  }
+
+  function updateBonusHint() {
+    const bonus = Number(bonusInput.value);
+    bonusValue.textContent = "+" + bonus;
+    const attr = attrById(attrSelect.value);
+    const base = attr ? attr.value : 0;
+    pipHint.textContent =
+      `${base + bonus} pips total — ${base} from ${attr ? attr.name : "attribute"}` +
+      (bonus ? `, +${bonus} for this skill.` : ".");
   }
 
   function setDraftPortrait(dataUrl) {
@@ -189,10 +326,9 @@
   }
 
   function applyEditorAccent() {
-    portraitFrame.parentElement.className = "editor-preview";
-    portraitFrame.className = "card-portrait-frame";
-    // reuse the attribute accent variables on the preview frame
-    portraitFrame.classList.add(`attr-${attrSelect.value}`);
+    const attr = attrById(attrSelect.value);
+    portraitFrame.className = "frame";
+    if (attr) portraitFrame.classList.add(`attr-${attr.slot}`);
   }
 
   /* Resize any uploaded image into a fixed 150x200 (cover) portrait. */
@@ -212,15 +348,10 @@
           canvas.width = PORTRAIT_W;
           canvas.height = PORTRAIT_H;
           const ctx = canvas.getContext("2d");
-
-          // cover-fit: fill the frame, crop the overflow, keep it centred
           const scale = Math.max(PORTRAIT_W / img.width, PORTRAIT_H / img.height);
           const w = img.width * scale;
           const h = img.height * scale;
-          const dx = (PORTRAIT_W - w) / 2;
-          const dy = (PORTRAIT_H - h) / 2;
-          ctx.drawImage(img, dx, dy, w, h);
-
+          ctx.drawImage(img, (PORTRAIT_W - w) / 2, (PORTRAIT_H - h) / 2, w, h);
           resolve(canvas.toDataURL("image/jpeg", 0.85));
         };
         img.src = reader.result;
@@ -231,8 +362,7 @@
 
   async function handleFile(file) {
     try {
-      const dataUrl = await processImage(file);
-      setDraftPortrait(dataUrl);
+      setDraftPortrait(await processImage(file));
     } catch (err) {
       alert("That file could not be used as a portrait: " + err.message);
     }
@@ -242,47 +372,39 @@
   function submit(e) {
     e.preventDefault();
     const name = nameInput.value.trim();
-    if (!name) {
-      nameInput.focus();
-      return;
-    }
+    if (!name) { nameInput.focus(); return; }
 
     const data = {
       name,
-      attr: attrSelect.value,
-      level: Number(levelInput.value),
+      attrId: attrSelect.value,
+      bonus: clamp(Number(bonusInput.value), 0, BONUS_MAX),
       desc: descInput.value.trim(),
       portrait: draftPortrait,
     };
 
     if (editingId) {
-      const skill = skills.find((s) => s.id === editingId);
+      const skill = skillById(editingId);
       if (skill) Object.assign(skill, data);
     } else {
-      skills.push({ id: uid(), ...data });
+      state.skills.push({ id: uid(), ...data });
     }
-
     save();
     render();
     closeEditor();
   }
 
   function removeSkill(id) {
-    const skill = skills.find((s) => s.id === id);
+    const skill = skillById(id);
     if (!skill) return;
     if (!confirm(`Delete "${skill.name}"? This cannot be undone.`)) return;
-    skills = skills.filter((s) => s.id !== id);
+    state.skills = state.skills.filter((s) => s.id !== id);
     save();
     render();
   }
 
-  /* ---------- import / export ---------- */
-  function exportSkills() {
-    if (skills.length === 0) {
-      alert("Nothing to export yet.");
-      return;
-    }
-    const blob = new Blob([JSON.stringify(skills, null, 2)], { type: "application/json" });
+  /* ---------- import / export / reset ---------- */
+  function exportState() {
+    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -291,24 +413,35 @@
     URL.revokeObjectURL(url);
   }
 
-  function importSkills(file) {
+  function importState(file) {
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        if (!Array.isArray(parsed)) throw new Error("Expected a list of skills.");
-        const cleaned = parsed.filter(isValidSkill).map((s) => ({
-          id: uid(),
-          name: String(s.name).slice(0, 40),
-          attr: ATTRS.includes(s.attr) ? s.attr : "intellect",
-          level: Math.min(12, Math.max(1, Number(s.level) || 1)),
-          desc: typeof s.desc === "string" ? s.desc.slice(0, 400) : "",
-          portrait: typeof s.portrait === "string" ? s.portrait : null,
-        }));
-        if (cleaned.length === 0) throw new Error("No valid skills found.");
-        const replace = skills.length > 0 &&
-          confirm(`Import ${cleaned.length} skill(s)?\n\nOK = replace current set\nCancel = merge into it`);
-        skills = replace ? cleaned : skills.concat(cleaned);
+        if (!parsed || !Array.isArray(parsed.attributes) || !Array.isArray(parsed.skills)) {
+          throw new Error("File is not a Skill Builder export.");
+        }
+        if (!confirm("Replace everything on the board with this file?")) return;
+        state = {
+          attributes: parsed.attributes.map((a, i) => ({
+            id: a.id || uid("at"),
+            slot: SLOTS[i] ? SLOTS[i].slot : "intellect",
+            name: String(a.name || "Attribute").slice(0, 24),
+            value: clamp(Number(a.value) || 1, ATTR_VALUE_MIN, ATTR_VALUE_MAX),
+          })),
+          skills: [],
+        };
+        const validAttrIds = new Set(state.attributes.map((a) => a.id));
+        state.skills = parsed.skills
+          .filter((s) => s && typeof s.name === "string")
+          .map((s) => ({
+            id: uid(),
+            attrId: validAttrIds.has(s.attrId) ? s.attrId : state.attributes[0].id,
+            name: String(s.name).slice(0, 40),
+            bonus: clamp(Number(s.bonus) || 0, 0, BONUS_MAX),
+            desc: typeof s.desc === "string" ? s.desc.slice(0, 400) : "",
+            portrait: typeof s.portrait === "string" ? s.portrait : null,
+          }));
         save();
         render();
       } catch (err) {
@@ -318,27 +451,25 @@
     reader.readAsText(file);
   }
 
+  function resetBoard() {
+    if (!confirm("Reset the board to the default four attributes and clear your skills?")) return;
+    state = defaultState();
+    save();
+    render();
+  }
+
   /* ---------- events ---------- */
-  $("#newSkillBtn").addEventListener("click", () => openEditor(null));
   $("#closeEditor").addEventListener("click", closeEditor);
   $("#cancelEditor").addEventListener("click", closeEditor);
   form.addEventListener("submit", submit);
 
-  document.addEventListener("click", (e) => {
-    if (e.target.matches("[data-open-new]")) openEditor(null);
-  });
-
-  editor.addEventListener("click", (e) => {
-    if (e.target === editor) closeEditor();
-  });
+  editor.addEventListener("click", (e) => { if (e.target === editor) closeEditor(); });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && !editor.hidden) closeEditor();
   });
 
-  levelInput.addEventListener("input", () => {
-    levelValue.textContent = levelInput.value;
-  });
-  attrSelect.addEventListener("change", applyEditorAccent);
+  bonusInput.addEventListener("input", updateBonusHint);
+  attrSelect.addEventListener("change", () => { updateBonusHint(); applyEditorAccent(); });
 
   portraitInput.addEventListener("change", (e) => {
     if (e.target.files[0]) handleFile(e.target.files[0]);
@@ -346,72 +477,23 @@
   });
   clearPortrait.addEventListener("click", () => setDraftPortrait(null));
 
-  // drag & drop onto the portrait frame
   ["dragenter", "dragover"].forEach((evt) =>
-    portraitFrame.addEventListener(evt, (e) => {
-      e.preventDefault();
-      portraitFrame.classList.add("dragover");
-    })
-  );
+    portraitFrame.addEventListener(evt, (e) => { e.preventDefault(); portraitFrame.classList.add("dragover"); }));
   ["dragleave", "drop"].forEach((evt) =>
-    portraitFrame.addEventListener(evt, (e) => {
-      e.preventDefault();
-      portraitFrame.classList.remove("dragover");
-    })
-  );
+    portraitFrame.addEventListener(evt, (e) => { e.preventDefault(); portraitFrame.classList.remove("dragover"); }));
   portraitFrame.addEventListener("drop", (e) => {
     const file = e.dataTransfer.files[0];
     if (file) handleFile(file);
   });
 
-  filters.addEventListener("click", (e) => {
-    const chip = e.target.closest(".chip");
-    if (!chip) return;
-    activeFilter = chip.dataset.attr;
-    filters.querySelectorAll(".chip").forEach((c) => c.classList.remove("chip-active"));
-    chip.classList.add("chip-active");
-    render();
-  });
-
-  $("#exportBtn").addEventListener("click", exportSkills);
+  $("#exportBtn").addEventListener("click", exportState);
   $("#importBtn").addEventListener("click", () => importFile.click());
+  $("#resetBtn").addEventListener("click", resetBoard);
   importFile.addEventListener("change", (e) => {
-    if (e.target.files[0]) importSkills(e.target.files[0]);
+    if (e.target.files[0]) importState(e.target.files[0]);
     importFile.value = "";
   });
 
   /* ---------- first paint ---------- */
-  if (skills.length === 0) seedExamples();
   render();
-
-  /* A couple of example voices so the board is never a blank stare. */
-  function seedExamples() {
-    skills = [
-      {
-        id: uid(),
-        name: "Inland Empire",
-        attr: "psyche",
-        level: 4,
-        desc: "Hunches and gut feelings. Dreams. The dread that follows you.",
-        portrait: null,
-      },
-      {
-        id: uid(),
-        name: "Electrochemistry",
-        attr: "physique",
-        level: 5,
-        desc: "Go on. One more. It will feel so good.",
-        portrait: null,
-      },
-      {
-        id: uid(),
-        name: "Encyclopedia",
-        attr: "intellect",
-        level: 3,
-        desc: "A head full of trivia, some of it even useful.",
-        portrait: null,
-      },
-    ];
-    save();
-  }
 })();

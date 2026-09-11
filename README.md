@@ -4,16 +4,24 @@ A browser-based skill builder in the spirit of *Disco Elysium*. Create your own
 skills with custom names, descriptions, and 150x200 portrait cards, sorted into
 the four attributes: Intellect, Psyche, Physique, and Motorics.
 
+## Model
+
+Like *Disco Elysium*, the board has four attributes, each with an **editable name**
+and a **value**. An attribute's value is the number of base **pips** available to
+every skill in its row, so raising an attribute levels up the whole row at once. A
+skill can also carry its own extra points (shown as white pips) on top of that base.
+
 ## Features
 
-- **Create, edit, delete skills** with a name, attribute, level (1-12), and description.
+- **Four attribute rows** with editable names and a value stepper. Colour-coded:
+  blue Intellect, purple Psyche, red Physique, gold Motorics.
+- **Attribute value drives the pips** on every skill in its row; per-skill points
+  add on top.
+- **Create, edit, delete skills** with a name, attribute, skill points, and description.
 - **Portrait cards, 150x200.** Upload or drag-and-drop any image. It is auto-cropped
-  (cover-fit) and downscaled to exactly 150x200 so every card lines up.
-- **Attribute colour coding** on each card (blue Intellect, purple Psyche, red
-  Physique, gold Motorics).
-- **Filter** the board by attribute.
-- **Local persistence.** Skills are saved to your browser's `localStorage`.
-- **Export / Import** the whole set as JSON so you can back it up or share it.
+  (cover-fit) and downscaled to exactly 150x200, framed in a thick black border.
+- **Local persistence** in `localStorage`, plus **Export / Import** the whole board
+  as JSON and a **Reset** to defaults.
 
 ## Running it
 
@@ -31,7 +39,7 @@ python3 -m http.server 8000
 |------|---------|
 | `index.html` | Markup and the editor modal |
 | `styles.css` | Theme, layout, and card styling |
-| `app.js` | State, rendering, the portrait pipeline, import/export |
+| `app.js` | Attribute/skill state, rendering, the portrait pipeline, import/export |
 
 ## Notes
 

@@ -17,30 +17,20 @@
       <h1 class="wordmark">Skill&nbsp;Builder</h1>
       <p class="tagline">Assemble the voices in your head.</p>
       <div class="topbar-actions">
-        <button id="newSkillBtn" class="btn btn-primary">+ New Skill</button>
         <button id="exportBtn" class="btn">Export</button>
         <button id="importBtn" class="btn">Import</button>
+        <button id="resetBtn" class="btn">Reset</button>
         <input type="file" id="importFile" accept="application/json" hidden />
       </div>
     </div>
   </header>
 
-  <nav class="filters" id="filters">
-    <button class="chip chip-active" data-attr="all">All</button>
-    <button class="chip" data-attr="intellect">Intellect</button>
-    <button class="chip" data-attr="psyche">Psyche</button>
-    <button class="chip" data-attr="physique">Physique</button>
-    <button class="chip" data-attr="motorics">Motorics</button>
-  </nav>
+  <main class="board" id="board" aria-live="polite"></main>
 
-  <main class="board">
-    <section id="grid" class="grid" aria-live="polite"></section>
-    <div id="emptyState" class="empty" hidden>
-      <p class="empty-title">No skills yet.</p>
-      <p class="empty-sub">Every disco needs its dancers. Create your first skill.</p>
-      <button class="btn btn-primary" data-open-new>+ New Skill</button>
-    </div>
-  </main>
+  <p class="hint">
+    Each attribute's value is the number of pips available to every skill in its row.
+    Raise the attribute and the whole row levels up.
+  </p>
 
   <!-- Editor modal -->
   <div id="editor" class="overlay" hidden>
@@ -52,7 +42,7 @@
 
       <div class="modal-body">
         <div class="editor-preview">
-          <div class="card-portrait-frame" id="portraitFrame">
+          <div class="frame" id="portraitFrame">
             <img id="portraitPreview" alt="" hidden />
             <div id="portraitPlaceholder" class="portrait-placeholder">
               <span>150 &times; 200</span>
@@ -71,18 +61,14 @@
           </label>
 
           <label class="field">
-            <span class="field-label">Attribute</span>
-            <select id="skillAttr">
-              <option value="intellect">Intellect</option>
-              <option value="psyche">Psyche</option>
-              <option value="physique">Physique</option>
-              <option value="motorics">Motorics</option>
-            </select>
+            <span class="field-label">Attribute (row)</span>
+            <select id="skillAttr"></select>
           </label>
 
           <label class="field">
-            <span class="field-label">Level <em id="levelValue">3</em></span>
-            <input type="range" id="skillLevel" min="1" max="12" value="3" />
+            <span class="field-label">Skill points <em id="bonusValue">+0</em></span>
+            <input type="range" id="skillBonus" min="0" max="8" value="0" />
+            <small class="field-note" id="pipHint"></small>
           </label>
 
           <label class="field">
