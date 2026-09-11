@@ -17,8 +17,8 @@
       <h1 class="wordmark">Skill&nbsp;Builder</h1>
       <p class="tagline">Assemble the voices in your head.</p>
       <div class="topbar-actions">
-        <button id="exportBtn" class="btn">Export</button>
-        <button id="importBtn" class="btn">Import</button>
+        <button id="exportBtn" class="btn">Export build</button>
+        <button id="importBtn" class="btn">Import build</button>
         <button id="resetBtn" class="btn">Reset</button>
         <input type="file" id="importFile" accept="application/json" hidden />
       </div>
@@ -28,63 +28,15 @@
   <main class="board" id="board" aria-live="polite"></main>
 
   <p class="hint">
-    Each attribute's value is the number of pips available to every skill in its row.
-    Raise the attribute and the whole row levels up.
+    Raise an attribute to add pips to every skill in its row. Assign skill points
+    to a single card with its &minus;&nbsp;/&nbsp;+. Hover a card for its description.
+    Names, portraits, and descriptions are set in <code>data.js</code>.
   </p>
 
-  <!-- Editor modal -->
-  <div id="editor" class="overlay" hidden>
-    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="editorTitle">
-      <div class="modal-head">
-        <h2 id="editorTitle">New Skill</h2>
-        <button class="icon-btn" id="closeEditor" aria-label="Close">&times;</button>
-      </div>
+  <!-- shared hover tooltip, positioned by script -->
+  <div id="tooltip" class="tooltip" role="status" hidden></div>
 
-      <div class="modal-body">
-        <div class="editor-preview">
-          <div class="frame" id="portraitFrame">
-            <img id="portraitPreview" alt="" hidden />
-            <div id="portraitPlaceholder" class="portrait-placeholder">
-              <span>150 &times; 200</span>
-              <small>drop or choose an image</small>
-            </div>
-          </div>
-          <label class="btn btn-ghost btn-block" for="portraitInput">Choose portrait</label>
-          <input type="file" id="portraitInput" accept="image/*" hidden />
-          <button type="button" class="btn-link" id="clearPortrait" hidden>Remove portrait</button>
-        </div>
-
-        <form class="editor-fields" id="skillForm" autocomplete="off">
-          <label class="field">
-            <span class="field-label">Skill name</span>
-            <input type="text" id="skillName" maxlength="40" placeholder="e.g. Inland Empire" required />
-          </label>
-
-          <label class="field">
-            <span class="field-label">Attribute (row)</span>
-            <select id="skillAttr"></select>
-          </label>
-
-          <label class="field">
-            <span class="field-label">Skill points <em id="bonusValue">+0</em></span>
-            <input type="range" id="skillBonus" min="0" max="8" value="0" />
-            <small class="field-note" id="pipHint"></small>
-          </label>
-
-          <label class="field">
-            <span class="field-label">Description</span>
-            <textarea id="skillDesc" rows="4" maxlength="400" placeholder="What does this voice whisper? Give it a personality."></textarea>
-          </label>
-
-          <div class="form-actions">
-            <button type="button" class="btn" id="cancelEditor">Cancel</button>
-            <button type="submit" class="btn btn-primary" id="saveSkill">Save skill</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  </div>
-
+  <script src="data.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

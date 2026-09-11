@@ -1,5 +1,6 @@
 /* ============================================================
-   Skill Builder - a Disco Elysium flavoured skill card maker
+   Skill Builder - a Disco Elysium flavoured skill card viewer
+   Content is defined in data.js. The UI only assigns values.
    ============================================================ */
 
 :root {
@@ -14,7 +15,7 @@
   --gold: #c8a45c;
   --gold-soft: #9c8144;
 
-  /* Attribute palettes: [bright, deep] used to tint the portrait frame */
+  /* Attribute palettes: [bright, deep] tint the portrait frame */
   --intellect: #4c9fd6;
   --intellect-deep: #23506e;
   --psyche: #a970c4;
@@ -110,23 +111,6 @@ html, body {
 }
 .btn:hover { border-color: var(--gold-soft); background: var(--panel); }
 .btn:active { transform: translateY(1px); }
-.btn-primary { color: #17130a; background: var(--gold); border-color: var(--gold); }
-.btn-primary:hover { background: #d9b56a; border-color: #d9b56a; }
-.btn-ghost { background: transparent; }
-.btn-block { width: 100%; text-align: center; display: block; }
-.btn-sm { padding: 5px 12px; font-size: 0.72rem; }
-.btn-link {
-  background: none; border: none; color: var(--ink-faint);
-  font-family: var(--sans); font-size: 0.78rem;
-  text-transform: uppercase; letter-spacing: 0.06em;
-  cursor: pointer; padding: 4px; margin-top: 8px;
-}
-.btn-link:hover { color: var(--physique); }
-.icon-btn {
-  background: none; border: none; color: var(--ink-dim);
-  font-size: 1.8rem; line-height: 1; cursor: pointer; padding: 0 6px;
-}
-.icon-btn:hover { color: var(--ink); }
 
 /* ---------- board / attribute rows ---------- */
 .board {
@@ -136,7 +120,6 @@ html, body {
   margin: 0 auto;
   padding: 22px 24px 10px;
 }
-
 .attr-row {
   --accent: var(--gold);
   --accent-deep: #333;
@@ -153,23 +136,14 @@ html, body {
   flex-wrap: wrap;
 }
 .attr-name {
+  margin: 0;
   font-family: var(--sans);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   font-weight: 600;
   font-size: 1.35rem;
   color: var(--accent);
-  background: transparent;
-  border: none;
-  border-bottom: 1px dashed transparent;
-  padding: 2px 2px;
-  min-width: 4ch;
-  width: auto;
-  max-width: 340px;
 }
-.attr-name:hover { border-bottom-color: var(--accent-deep); }
-.attr-name:focus { outline: none; border-bottom-color: var(--accent); }
-
 .stepper {
   display: inline-flex;
   align-items: center;
@@ -186,8 +160,8 @@ html, body {
   color: var(--ink); background: transparent; border: none; cursor: pointer;
   border-radius: 2px;
 }
-.stepper .step:hover { background: var(--panel-2); color: var(--accent); }
-.stepper .step:disabled { color: var(--ink-faint); cursor: default; background: none; }
+.stepper .step:hover:not(:disabled) { background: var(--panel-2); color: var(--accent); }
+.stepper .step:disabled { color: var(--ink-faint); cursor: default; }
 .stepper .val {
   min-width: 30px; text-align: center;
   font-family: var(--sans); font-size: 1.25rem; font-weight: 600;
@@ -197,7 +171,6 @@ html, body {
   font-family: var(--sans); text-transform: uppercase;
   letter-spacing: 0.1em; font-size: 0.68rem; color: var(--ink-faint);
 }
-.attr-head .add-skill { margin-left: auto; }
 
 /* horizontal scroller of cards */
 .row-cards {
@@ -209,47 +182,46 @@ html, body {
 }
 .row-cards::-webkit-scrollbar { height: 8px; }
 .row-cards::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
-.row-empty {
-  font-style: italic; color: var(--ink-faint);
-  padding: 40px 6px; font-size: 1.1rem;
-}
 
 /* ---------- skill card ---------- */
 .card {
   flex: 0 0 auto;
   width: var(--portrait-w);
   scroll-snap-align: start;
+  outline: none;
 }
+.card:focus-visible .frame { outline: 2px solid var(--accent); outline-offset: 2px; }
 .frame {
   width: var(--portrait-w);
   height: var(--portrait-h);
   border: 5px solid #000;
-  background:
-    radial-gradient(120% 90% at 50% 0%, var(--accent) 0%, var(--accent-deep) 70%, #000 130%);
+  background: radial-gradient(120% 90% at 50% 0%, var(--accent) 0%, var(--accent-deep) 70%, #000 130%);
   position: relative;
   overflow: hidden;
   box-shadow: 0 6px 18px rgba(0,0,0,0.5);
+  transition: transform .12s ease;
 }
-.frame img {
-  width: 100%; height: 100%;
-  object-fit: cover; display: block;
-}
+.card:hover .frame { transform: translateY(-3px); }
+.frame img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
 .card-meta { margin-top: 8px; text-align: center; }
 .card-name {
   margin: 0;
   font-family: var(--sans);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   font-weight: 500;
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   color: var(--accent);
   line-height: 1.12;
+  overflow-wrap: anywhere;
 }
 .pips {
   display: flex;
   flex-wrap: wrap;
   gap: 3px;
   justify-content: center;
+  align-items: center;
   margin: 7px 0 2px;
 }
 .pip {
@@ -261,15 +233,31 @@ html, body {
 .pip.bonus { background: #fff; }
 .pip-count {
   font-family: var(--sans); font-size: 0.7rem;
-  color: var(--ink-faint); letter-spacing: 0.05em;
+  color: var(--ink-faint); letter-spacing: 0.05em; margin-left: 2px;
 }
-.card-desc {
-  font-size: 0.98rem; line-height: 1.28;
-  color: var(--ink-dim); font-style: italic;
-  margin: 6px 2px 8px;
+
+/* per-card skill point assignment */
+.assign {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
 }
-.card-actions { display: flex; gap: 6px; justify-content: center; }
-.card-actions .btn { flex: 1; }
+.assign .step {
+  width: 24px; height: 24px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--sans); font-size: 1.05rem; line-height: 1;
+  color: var(--ink); background: var(--bg-2);
+  border: 1px solid var(--line); border-radius: 2px; cursor: pointer;
+}
+.assign .step:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.assign .step:disabled { color: var(--ink-faint); cursor: default; }
+.assign-label {
+  min-width: 44px; text-align: center;
+  font-family: var(--sans); text-transform: uppercase;
+  letter-spacing: 0.06em; font-size: 0.72rem; color: var(--ink-dim);
+}
 
 /* accent classes per attribute slot */
 .attr-intellect { --accent: var(--intellect); --accent-deep: var(--intellect-deep); }
@@ -277,101 +265,37 @@ html, body {
 .attr-physique  { --accent: var(--physique);  --accent-deep: var(--physique-deep); }
 .attr-motorics  { --accent: var(--motorics);  --accent-deep: var(--motorics-deep); }
 
-/* add-skill placeholder card */
-.card-add {
-  flex: 0 0 auto;
-  width: var(--portrait-w);
-  height: var(--portrait-h);
-  border: 3px dashed var(--line);
-  background: transparent;
-  color: var(--ink-faint);
-  font-family: var(--sans); text-transform: uppercase;
-  letter-spacing: 0.08em; font-size: 0.85rem;
-  cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  scroll-snap-align: start;
+/* ---------- hover tooltip ---------- */
+.tooltip {
+  position: fixed;
+  z-index: 20;
+  max-width: 240px;
+  padding: 10px 13px;
+  background: #0c0e10;
+  border: 1px solid var(--gold-soft);
+  border-radius: 3px;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  box-shadow: 0 10px 26px rgba(0,0,0,0.6);
+  pointer-events: none;
 }
-.card-add:hover { border-color: var(--accent); color: var(--accent); }
 
+/* ---------- footer hint ---------- */
 .hint {
   position: relative; z-index: 2;
   max-width: 1180px; margin: 0 auto; padding: 6px 24px 60px;
   font-style: italic; color: var(--ink-faint); font-size: 1.05rem;
 }
-
-/* ---------- modal ---------- */
-.overlay {
-  position: fixed; inset: 0; z-index: 10;
-  background: rgba(7,9,10,0.72);
-  backdrop-filter: blur(3px);
-  display: flex; align-items: flex-start; justify-content: center;
-  padding: 40px 16px; overflow-y: auto;
+.hint code {
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-style: normal; font-size: 0.9em; color: var(--gold);
 }
-.modal {
-  width: 100%; max-width: 640px;
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-top: 3px solid var(--gold);
-  border-radius: 3px;
-  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
-}
-.modal-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 16px 20px; border-bottom: 1px solid var(--line);
-}
-.modal-head h2 {
-  margin: 0; font-family: var(--sans);
-  text-transform: uppercase; letter-spacing: 0.1em;
-  font-weight: 500; font-size: 1.1rem; color: var(--gold);
-}
-.modal-body {
-  display: grid; grid-template-columns: 190px 1fr;
-  gap: 24px; padding: 22px 20px 24px;
-}
-
-.editor-preview { text-align: center; }
-.editor-preview .frame {
-  margin: 0 auto 12px;
-  cursor: pointer;
-  --accent: var(--gold); --accent-deep: #2a3138;
-}
-.editor-preview .frame.dragover { outline: 2px dashed var(--gold); outline-offset: -6px; }
-.portrait-placeholder {
-  position: absolute; inset: 0;
-  display: flex; flex-direction: column;
-  align-items: center; justify-content: center; gap: 6px;
-  color: rgba(0,0,0,0.5); font-family: var(--sans);
-}
-.portrait-placeholder span { font-size: 1.3rem; letter-spacing: 0.1em; }
-.portrait-placeholder small { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.08em; }
-
-.editor-fields { display: flex; flex-direction: column; gap: 16px; }
-.field { display: flex; flex-direction: column; gap: 6px; }
-.field-label {
-  font-family: var(--sans); text-transform: uppercase;
-  letter-spacing: 0.08em; font-size: 0.74rem; color: var(--ink-dim);
-}
-.field-label em { color: var(--gold); font-style: normal; font-weight: 600; margin-left: 4px; }
-.field-note { font-style: italic; color: var(--ink-faint); font-size: 0.95rem; }
-.field input[type="text"],
-.field textarea,
-.field select {
-  font-family: var(--serif); font-size: 1.1rem; color: var(--ink);
-  background: var(--bg-2); border: 1px solid var(--line);
-  border-radius: 2px; padding: 9px 11px; width: 100%;
-}
-.field textarea { resize: vertical; line-height: 1.35; }
-.field input:focus, .field textarea:focus, .field select:focus {
-  outline: none; border-color: var(--gold-soft);
-}
-.field input[type="range"] { accent-color: var(--gold); width: 100%; }
-
-.form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
 
 /* ---------- responsive ---------- */
 @media (max-width: 560px) {
-  .modal-body { grid-template-columns: 1fr; }
-  .editor-preview .frame { margin-inline: auto; }
   .topbar-inner { grid-template-columns: 1fr; grid-template-areas: "word" "tag" "actions"; }
   .topbar-actions { justify-content: flex-start; margin-top: 12px; }
 }

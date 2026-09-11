@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Portrait Sheet Slicer</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 0; background: #14171a; color: #e8e0cf; }
+  header { padding: 20px 24px; border-bottom: 1px solid #3a4249; }
+  h1 { margin: 0 0 6px; font-size: 1.3rem; }
+  p { margin: 4px 0; color: #a49b86; font-size: 0.9rem; }
+  main { padding: 22px 24px; }
+  .controls { display: flex; gap: 16px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 18px; }
+  label { display: flex; flex-direction: column; gap: 4px; font-size: 0.8rem; color: #a49b86; }
+  input[type="number"] { width: 90px; padding: 6px; background: #1b2024; color: #e8e0cf; border: 1px solid #3a4249; border-radius: 3px; }
+  button { font: inherit; padding: 9px 16px; background: #c8a45c; color: #17130a; border: none; border-radius: 3px; cursor: pointer; }
+  button.ghost { background: #262d33; color: #e8e0cf; border: 1px solid #3a4249; }
+  .rows { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; max-width: 1000px; }
+  figure { margin: 0; text-align: center; }
+  canvas { border: 3px solid #000; width: 100%; height: auto; image-rendering: auto; background: #000; }
+  figcaption { font-size: 0.7rem; color: #6f6858; margin-top: 4px; word-break: break-all; }
+  .note { color: #6f6858; font-size: 0.8rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Portrait Sheet Slicer</h1>
+  <p>Crops a 6&nbsp;x&nbsp;4 sheet (one attribute per row) into 24 files named
+     <code>&lt;slot&gt;-&lt;n&gt;.png</code>, each 150&nbsp;x&nbsp;200.</p>
+  <p class="note">Auto-detects card gutters. If a crop looks off, tweak the margin/gutter
+     numbers and re-slice.</p>
+</header>
+<main>
+  <div class="controls">
+    <label>Sheet image
+      <input type="file" id="file" accept="image/*" />
+    </label>
+    <label>Columns <input type="number" id="cols" value="6" min="1" /></label>
+    <label>Rows <input type="number" id="rows" value="4" min="1" /></label>
+    <label>Outer margin %
+      <input type="number" id="margin" value="0" min="0" max="40" step="0.5" />
+    </label>
+    <label>Gutter %
+      <input type="number" id="gutter" value="0" min="0" max="30" step="0.5" />
+    </label>
+    <button id="slice">Slice</button>
+    <button id="download" class="ghost">Download all 24</button>
+  </div>
+  <div class="rows" id="out"></div>
+</main>
+
+<script>
+  const SLOTS = ["intellect", "psyche", "physique", "motorics"];
+  const OUT_W = 150, OUT_H = 200;
+  const $ = (id) => document.getElementById(id);
+  let sheet = null;
+  const crops = []; // { name, canvas }
+
+  $("file").addEventListener("change", (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const img = new Image();
+    img.onload = () => { sheet = img; slice(); };
+    img.src = URL.createObjectURL(f);
+  });
+  $("slice").addEventListener("click", slice);
+  $("download").addEventListener("click", downloadAll);
+
+  function slice() {
+    if (!sheet) { alert("Choose a sheet image first."); return; }
+    const cols = +$("cols").value, rows = +$("rows").value;
+    const m = (+$("margin").value / 100);
+    const g = (+$("gutter").value / 100);
+    const out = $("out");
+    out.innerHTML = "";
+    crops.length = 0;
+
+    const W = sheet.naturalWidth, H = sheet.naturalHeight;
+    const usableW = W * (1 - 2 * m);
+    const usableH = H * (1 - 2 * m);
+    const gutterW = usableW * g;
+    const gutterH = usableH * g;
+    const cellW = (usableW - gutterW * (cols - 1)) / cols;
+    const cellH = (usableH - gutterH * (rows - 1)) / rows;
+    const x0 = W * m, y0 = H * m;
+
+    for (let r = 0; r < rows; r++) {
+      const slot = SLOTS[r] || `row${r + 1}`;
+      for (let c = 0; c < cols; c++) {
+        const sx = x0 + c * (cellW + gutterW);
+        const sy = y0 + r * (cellH + gutterH);
+        const canvas = document.createElement("canvas");
+        canvas.width = OUT_W; canvas.height = OUT_H;
+        const ctx = canvas.getContext("2d");
+        // cover-fit the cell into 150x200
+        const scale = Math.max(OUT_W / cellW, OUT_H / cellH);
+        const dw = cellW * scale, dh = cellH * scale;
+        ctx.drawImage(sheet, sx, sy, cellW, cellH,
+          (OUT_W - dw) / 2, (OUT_H - dh) / 2, dw, dh);
+
+        const name = `${slot}-${c + 1}.png`;
+        crops.push({ name, canvas });
+
+        const fig = document.createElement("figure");
+        fig.appendChild(canvas);
+        const cap = document.createElement("figcaption");
+        cap.textContent = name;
+        fig.appendChild(cap);
+        out.appendChild(fig);
+      }
+    }
+  }
+
+  function downloadAll() {
+    if (!crops.length) { alert("Slice first."); return; }
+    let i = 0;
+    const next = () => {
+      if (i >= crops.length) return;
+      const { name, canvas } = crops[i++];
+      canvas.toBlob((blob) => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = name;
+        a.click();
+        setTimeout(() => { URL.revokeObjectURL(a.href); next(); }, 150);
+      }, "image/png");
+    };
+    next();
+  }
+</script>
+</body>
+</html>

@@ -1,185 +1,123 @@
 /* ============================================================
-   Skill Builder - state, rendering, and the portrait pipeline
+   Skill Builder - runtime
 
-   Model mirrors Disco Elysium: four attributes, each with an
-   editable name and a value. An attribute's value is the number
-   of base pips available to every skill in its row. A skill may
-   carry its own extra points on top of that base.
+   Content (names, portraits, descriptions) is fixed and comes
+   from data.js. The running app is deliberately limited: the
+   only things a player can change are
+
+     - an attribute's value  (adds pips to every skill in its row)
+     - a skill's assigned points
+
+   Those assignments - and nothing else - are saved to
+   localStorage. Editing content is a dev-side job in data.js.
    ============================================================ */
 
 (() => {
   "use strict";
 
-  const STORAGE_KEY = "skillbuilder.state.v2";
-  const PORTRAIT_W = 150;
-  const PORTRAIT_H = 200;
+  const STORAGE_KEY = "skillbuilder.build.v1";
   const ATTR_VALUE_MIN = 1;
   const ATTR_VALUE_MAX = 8;
+  const BONUS_MIN = 0;
   const BONUS_MAX = 8;
 
-  // Fixed attribute slots (colour + default name). Names are editable.
-  const SLOTS = [
-    { slot: "intellect", name: "Intellect" },
-    { slot: "psyche", name: "Psyche" },
-    { slot: "physique", name: "Physique" },
-    { slot: "motorics", name: "Motorics" },
-  ];
+  const DATA = window.SKILL_DATA;
+  if (!DATA || !Array.isArray(DATA.attributes)) {
+    document.getElementById("board").textContent = "data.js failed to load.";
+    return;
+  }
 
-  /* ---------- state ---------- */
-  let state = load();
-  let editingId = null;       // null while creating a new skill
-  let editingAttrId = null;   // which attribute a new skill lands in
-  let draftPortrait = null;
-
-  /* ---------- element refs ---------- */
   const $ = (sel) => document.querySelector(sel);
   const board = $("#board");
-
-  const editor = $("#editor");
-  const editorTitle = $("#editorTitle");
-  const form = $("#skillForm");
-  const nameInput = $("#skillName");
-  const attrSelect = $("#skillAttr");
-  const bonusInput = $("#skillBonus");
-  const bonusValue = $("#bonusValue");
-  const pipHint = $("#pipHint");
-  const descInput = $("#skillDesc");
-
-  const portraitFrame = $("#portraitFrame");
-  const portraitInput = $("#portraitInput");
-  const portraitPreview = $("#portraitPreview");
-  const portraitPlaceholder = $("#portraitPlaceholder");
-  const clearPortrait = $("#clearPortrait");
-
+  const tooltip = $("#tooltip");
   const importFile = $("#importFile");
 
-  /* ---------- persistence ---------- */
-  function defaultState() {
-    const attributes = SLOTS.map((s) => ({
-      id: uid("at"),
-      slot: s.slot,
-      name: s.name,
-      value: 3,
-    }));
-    const byName = (n) => attributes.find((a) => a.slot === n).id;
-    const skills = [
-      { id: uid(), attrId: byName("intellect"), name: "Encyclopedia", bonus: 0,
-        desc: "A head full of trivia, some of it even useful.", portrait: null },
-      { id: uid(), attrId: byName("psyche"), name: "Inland Empire", bonus: 1,
-        desc: "Hunches and gut feelings. Dreams. The dread that follows you.", portrait: null },
-      { id: uid(), attrId: byName("physique"), name: "Electrochemistry", bonus: 2,
-        desc: "Go on. One more. It will feel so good.", portrait: null },
-      { id: uid(), attrId: byName("motorics"), name: "Savoir Faire", bonus: 0,
-        desc: "Slip in, slip out. Be the smoothest thing in the room.", portrait: null },
-    ];
-    return { attributes, skills };
+  const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+  const skillKey = (slot, i) => `${slot}-${i}`;
+
+  /* ---------- the player's build (the only mutable state) ---------- */
+  // { values: { intellect: 3, ... }, points: { "intellect-0": 1, ... } }
+  let build = load();
+
+  function defaultBuild() {
+    const values = {};
+    for (const attr of DATA.attributes) values[attr.slot] = attr.value || ATTR_VALUE_MIN;
+    return { values, points: {} };
   }
 
   function load() {
+    const base = defaultBuild();
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
-      if (!raw) return defaultState();
-      const parsed = JSON.parse(raw);
-      if (!parsed || !Array.isArray(parsed.attributes) || !Array.isArray(parsed.skills)) {
-        return defaultState();
+      if (!raw) return base;
+      const saved = JSON.parse(raw);
+      if (saved && saved.values) {
+        for (const slot in base.values) {
+          if (typeof saved.values[slot] === "number") {
+            base.values[slot] = clamp(saved.values[slot], ATTR_VALUE_MIN, ATTR_VALUE_MAX);
+          }
+        }
       }
-      return parsed;
+      if (saved && saved.points && typeof saved.points === "object") {
+        base.points = {};
+        for (const k in saved.points) {
+          base.points[k] = clamp(Number(saved.points[k]) || 0, BONUS_MIN, BONUS_MAX);
+        }
+      }
     } catch (err) {
-      console.warn("Could not read saved state:", err);
-      return defaultState();
+      console.warn("Could not read saved build:", err);
     }
+    return base;
   }
 
   function save() {
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(build));
     } catch (err) {
-      alert("Could not save. Browser storage is full or blocked. Export to keep your work.");
-      console.warn(err);
+      console.warn("Could not save build:", err);
     }
   }
 
-  function uid(prefix) {
-    return (prefix || "sk") + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-  }
-
-  const attrById = (id) => state.attributes.find((a) => a.id === id);
-  const skillById = (id) => state.skills.find((s) => s.id === id);
-  const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
-  const effectivePips = (skill) => {
-    const attr = attrById(skill.attrId);
-    return (attr ? attr.value : 0) + (skill.bonus || 0);
-  };
+  const attrValue = (slot) => build.values[slot] ?? ATTR_VALUE_MIN;
+  const skillPoints = (slot, i) => build.points[skillKey(slot, i)] || 0;
 
   /* ---------- rendering ---------- */
   function render() {
     board.innerHTML = "";
-    for (const attr of state.attributes) {
-      board.appendChild(rowEl(attr));
-    }
+    for (const attr of DATA.attributes) board.appendChild(rowEl(attr));
   }
 
   function rowEl(attr) {
     const row = document.createElement("section");
     row.className = `attr-row attr-${attr.slot}`;
-    row.dataset.attrId = attr.id;
 
-    /* header: editable name, value stepper, add button */
     const head = document.createElement("header");
     head.className = "attr-head";
 
-    const nameField = document.createElement("input");
-    nameField.className = "attr-name";
-    nameField.value = attr.name;
-    nameField.maxLength = 24;
-    nameField.setAttribute("aria-label", "Attribute name");
-    nameField.addEventListener("change", () => {
-      attr.name = nameField.value.trim() || "Attribute";
-      nameField.value = attr.name;
-      save();
-    });
-    // autosize-ish: keep width tied to content. The uppercase Oswald face
-    // with letter-spacing runs ~1.4ch per glyph, so estimate generously.
-    const sizeName = (v) => {
-      nameField.style.width = Math.ceil(Math.max(5, v.length) * 1.4 + 2) + "ch";
-    };
-    sizeName(attr.name);
-    nameField.addEventListener("input", () => sizeName(nameField.value));
+    const name = document.createElement("h2");
+    name.className = "attr-name";
+    name.textContent = attr.name;
 
     const stepper = document.createElement("div");
     stepper.className = "stepper";
-    const minus = stepEl("−", () => setAttrValue(attr, attr.value - 1));
+    const minus = stepEl("−", () => bumpAttr(attr.slot, -1));
     const val = document.createElement("span");
     val.className = "val";
-    val.textContent = attr.value;
-    const plus = stepEl("+", () => setAttrValue(attr, attr.value + 1));
-    minus.disabled = attr.value <= ATTR_VALUE_MIN;
-    plus.disabled = attr.value >= ATTR_VALUE_MAX;
+    val.textContent = attrValue(attr.slot);
+    const plus = stepEl("+", () => bumpAttr(attr.slot, +1));
+    minus.disabled = attrValue(attr.slot) <= ATTR_VALUE_MIN;
+    plus.disabled = attrValue(attr.slot) >= ATTR_VALUE_MAX;
     stepper.append(minus, val, plus);
 
     const caption = document.createElement("span");
     caption.className = "caption";
-    caption.textContent = "pips per skill";
+    caption.textContent = "attribute → pips per skill";
 
-    const addBtn = document.createElement("button");
-    addBtn.className = "btn btn-sm add-skill";
-    addBtn.textContent = "+ Skill";
-    addBtn.addEventListener("click", () => openEditor(null, attr.id));
+    head.append(name, stepper, caption);
 
-    head.append(nameField, stepper, caption, addBtn);
-
-    /* cards */
     const cards = document.createElement("div");
     cards.className = "row-cards";
-    const rowSkills = state.skills.filter((s) => s.attrId === attr.id);
-
-    for (const skill of rowSkills) cards.appendChild(cardEl(skill, attr));
-
-    const addCard = document.createElement("button");
-    addCard.className = "card-add";
-    addCard.innerHTML = "<span>+ Add skill</span>";
-    addCard.addEventListener("click", () => openEditor(null, attr.id));
-    cards.appendChild(addCard);
+    attr.skills.forEach((skill, i) => cards.appendChild(cardEl(attr, skill, i)));
 
     row.append(head, cards);
     return row;
@@ -188,21 +126,33 @@
   function stepEl(label, onClick) {
     const b = document.createElement("button");
     b.className = "step";
+    b.type = "button";
     b.textContent = label;
     b.addEventListener("click", onClick);
     return b;
   }
 
-  function setAttrValue(attr, next) {
-    attr.value = clamp(next, ATTR_VALUE_MIN, ATTR_VALUE_MAX);
+  function bumpAttr(slot, dir) {
+    build.values[slot] = clamp(attrValue(slot) + dir, ATTR_VALUE_MIN, ATTR_VALUE_MAX);
     save();
     render();
   }
 
-  function cardEl(skill, attr) {
+  function bumpSkill(slot, i, dir) {
+    const k = skillKey(slot, i);
+    build.points[k] = clamp(skillPoints(slot, i) + dir, BONUS_MIN, BONUS_MAX);
+    if (build.points[k] === 0) delete build.points[k];
+    save();
+    render();
+  }
+
+  function cardEl(attr, skill, i) {
+    const base = attrValue(attr.slot);
+    const bonus = skillPoints(attr.slot, i);
+
     const card = document.createElement("article");
     card.className = "card";
-    card.dataset.id = skill.id;
+    card.tabIndex = 0;
 
     const frame = document.createElement("div");
     frame.className = "frame";
@@ -210,6 +160,9 @@
       const img = document.createElement("img");
       img.src = skill.portrait;
       img.alt = skill.name;
+      img.loading = "lazy";
+      // if the file is not there yet, drop the img and keep the tinted frame
+      img.addEventListener("error", () => img.remove());
       frame.appendChild(img);
     }
 
@@ -220,25 +173,29 @@
     name.className = "card-name";
     name.textContent = skill.name;
 
-    meta.append(name, pipsEl(attr.value, skill.bonus || 0));
+    meta.append(name, pipsEl(base, bonus));
 
-    const desc = document.createElement("p");
-    desc.className = "card-desc";
-    desc.textContent = skill.desc || "";
+    const assign = document.createElement("div");
+    assign.className = "assign";
+    const minus = stepEl("−", () => bumpSkill(attr.slot, i, -1));
+    const label = document.createElement("span");
+    label.className = "assign-label";
+    label.textContent = bonus ? `+${bonus}` : "points";
+    const plus = stepEl("+", () => bumpSkill(attr.slot, i, +1));
+    minus.disabled = bonus <= BONUS_MIN;
+    plus.disabled = bonus >= BONUS_MAX;
+    assign.append(minus, label, plus);
 
-    const actions = document.createElement("div");
-    actions.className = "card-actions";
-    const editBtn = document.createElement("button");
-    editBtn.className = "btn btn-sm";
-    editBtn.textContent = "Edit";
-    editBtn.addEventListener("click", () => openEditor(skill.id));
-    const delBtn = document.createElement("button");
-    delBtn.className = "btn btn-sm";
-    delBtn.textContent = "Delete";
-    delBtn.addEventListener("click", () => removeSkill(skill.id));
-    actions.append(editBtn, delBtn);
+    card.append(frame, meta, assign);
 
-    card.append(frame, meta, desc, actions);
+    // hover / focus description
+    const show = () => showTooltip(card, skill.desc);
+    const hide = () => hideTooltip();
+    card.addEventListener("mouseenter", show);
+    card.addEventListener("mouseleave", hide);
+    card.addEventListener("focus", show);
+    card.addEventListener("blur", hide);
+
     return card;
   }
 
@@ -246,9 +203,7 @@
     const wrap = document.createElement("div");
     wrap.className = "pips";
     const total = base + bonus;
-    wrap.title = bonus
-      ? `${total} pips (${base} from attribute, +${bonus})`
-      : `${total} pips`;
+    wrap.title = bonus ? `${total} pips (${base} + ${bonus})` : `${total} pips`;
     for (let i = 0; i < total; i++) {
       const p = document.createElement("span");
       p.className = i >= base ? "pip bonus" : "pip";
@@ -261,236 +216,79 @@
     return wrap;
   }
 
-  /* ---------- editor ---------- */
-  function populateAttrSelect(selectedId) {
-    attrSelect.innerHTML = "";
-    for (const attr of state.attributes) {
-      const opt = document.createElement("option");
-      opt.value = attr.id;
-      opt.textContent = attr.name;
-      attrSelect.appendChild(opt);
-    }
-    attrSelect.value = selectedId || state.attributes[0].id;
+  /* ---------- tooltip ---------- */
+  function showTooltip(anchor, text) {
+    if (!text) return;
+    tooltip.textContent = text;
+    tooltip.hidden = false;
+    const r = anchor.getBoundingClientRect();
+    const tw = tooltip.offsetWidth;
+    const th = tooltip.offsetHeight;
+    let left = r.left + r.width / 2 - tw / 2;
+    left = Math.max(8, Math.min(left, window.innerWidth - tw - 8));
+    let top = r.top - th - 10;              // prefer above
+    if (top < 8) top = r.bottom + 10;       // otherwise below
+    tooltip.style.left = `${left}px`;
+    tooltip.style.top = `${top}px`;
   }
-
-  function openEditor(id, attrId) {
-    editingId = id || null;
-    const skill = id ? skillById(id) : null;
-    editingAttrId = skill ? skill.attrId : (attrId || state.attributes[0].id);
-
-    editorTitle.textContent = skill ? "Edit Skill" : "New Skill";
-    populateAttrSelect(editingAttrId);
-    nameInput.value = skill ? skill.name : "";
-    bonusInput.value = skill ? (skill.bonus || 0) : 0;
-    descInput.value = skill ? skill.desc : "";
-    setDraftPortrait(skill ? skill.portrait : null);
-    updateBonusHint();
-    applyEditorAccent();
-
-    editor.hidden = false;
-    document.body.style.overflow = "hidden";
-    nameInput.focus();
+  function hideTooltip() {
+    tooltip.hidden = true;
   }
+  window.addEventListener("scroll", hideTooltip, true);
 
-  function closeEditor() {
-    editor.hidden = true;
-    document.body.style.overflow = "";
-    editingId = null;
-    draftPortrait = null;
-    form.reset();
-  }
-
-  function updateBonusHint() {
-    const bonus = Number(bonusInput.value);
-    bonusValue.textContent = "+" + bonus;
-    const attr = attrById(attrSelect.value);
-    const base = attr ? attr.value : 0;
-    pipHint.textContent =
-      `${base + bonus} pips total — ${base} from ${attr ? attr.name : "attribute"}` +
-      (bonus ? `, +${bonus} for this skill.` : ".");
-  }
-
-  function setDraftPortrait(dataUrl) {
-    draftPortrait = dataUrl || null;
-    if (draftPortrait) {
-      portraitPreview.src = draftPortrait;
-      portraitPreview.hidden = false;
-      portraitPlaceholder.hidden = true;
-      clearPortrait.hidden = false;
-    } else {
-      portraitPreview.removeAttribute("src");
-      portraitPreview.hidden = true;
-      portraitPlaceholder.hidden = false;
-      clearPortrait.hidden = true;
-    }
-  }
-
-  function applyEditorAccent() {
-    const attr = attrById(attrSelect.value);
-    portraitFrame.className = "frame";
-    if (attr) portraitFrame.classList.add(`attr-${attr.slot}`);
-  }
-
-  /* Resize any uploaded image into a fixed 150x200 (cover) portrait. */
-  function processImage(file) {
-    return new Promise((resolve, reject) => {
-      if (!file || !file.type.startsWith("image/")) {
-        reject(new Error("Not an image file."));
-        return;
-      }
-      const reader = new FileReader();
-      reader.onerror = () => reject(reader.error);
-      reader.onload = () => {
-        const img = new Image();
-        img.onerror = () => reject(new Error("Could not decode image."));
-        img.onload = () => {
-          const canvas = document.createElement("canvas");
-          canvas.width = PORTRAIT_W;
-          canvas.height = PORTRAIT_H;
-          const ctx = canvas.getContext("2d");
-          const scale = Math.max(PORTRAIT_W / img.width, PORTRAIT_H / img.height);
-          const w = img.width * scale;
-          const h = img.height * scale;
-          ctx.drawImage(img, (PORTRAIT_W - w) / 2, (PORTRAIT_H - h) / 2, w, h);
-          resolve(canvas.toDataURL("image/jpeg", 0.85));
-        };
-        img.src = reader.result;
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-
-  async function handleFile(file) {
-    try {
-      setDraftPortrait(await processImage(file));
-    } catch (err) {
-      alert("That file could not be used as a portrait: " + err.message);
-    }
-  }
-
-  /* ---------- CRUD ---------- */
-  function submit(e) {
-    e.preventDefault();
-    const name = nameInput.value.trim();
-    if (!name) { nameInput.focus(); return; }
-
-    const data = {
-      name,
-      attrId: attrSelect.value,
-      bonus: clamp(Number(bonusInput.value), 0, BONUS_MAX),
-      desc: descInput.value.trim(),
-      portrait: draftPortrait,
-    };
-
-    if (editingId) {
-      const skill = skillById(editingId);
-      if (skill) Object.assign(skill, data);
-    } else {
-      state.skills.push({ id: uid(), ...data });
-    }
-    save();
-    render();
-    closeEditor();
-  }
-
-  function removeSkill(id) {
-    const skill = skillById(id);
-    if (!skill) return;
-    if (!confirm(`Delete "${skill.name}"? This cannot be undone.`)) return;
-    state.skills = state.skills.filter((s) => s.id !== id);
-    save();
-    render();
-  }
-
-  /* ---------- import / export / reset ---------- */
-  function exportState() {
-    const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
+  /* ---------- export / import / reset (build only) ---------- */
+  function exportBuild() {
+    const blob = new Blob([JSON.stringify(build, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = "skills.json";
+    a.download = "skill-build.json";
     a.click();
     URL.revokeObjectURL(url);
   }
 
-  function importState(file) {
+  function importBuild(file) {
     const reader = new FileReader();
     reader.onload = () => {
       try {
         const parsed = JSON.parse(reader.result);
-        if (!parsed || !Array.isArray(parsed.attributes) || !Array.isArray(parsed.skills)) {
-          throw new Error("File is not a Skill Builder export.");
+        if (!parsed || typeof parsed !== "object") throw new Error("Not a build file.");
+        build = defaultBuild();
+        if (parsed.values) {
+          for (const slot in build.values) {
+            if (typeof parsed.values[slot] === "number") {
+              build.values[slot] = clamp(parsed.values[slot], ATTR_VALUE_MIN, ATTR_VALUE_MAX);
+            }
+          }
         }
-        if (!confirm("Replace everything on the board with this file?")) return;
-        state = {
-          attributes: parsed.attributes.map((a, i) => ({
-            id: a.id || uid("at"),
-            slot: SLOTS[i] ? SLOTS[i].slot : "intellect",
-            name: String(a.name || "Attribute").slice(0, 24),
-            value: clamp(Number(a.value) || 1, ATTR_VALUE_MIN, ATTR_VALUE_MAX),
-          })),
-          skills: [],
-        };
-        const validAttrIds = new Set(state.attributes.map((a) => a.id));
-        state.skills = parsed.skills
-          .filter((s) => s && typeof s.name === "string")
-          .map((s) => ({
-            id: uid(),
-            attrId: validAttrIds.has(s.attrId) ? s.attrId : state.attributes[0].id,
-            name: String(s.name).slice(0, 40),
-            bonus: clamp(Number(s.bonus) || 0, 0, BONUS_MAX),
-            desc: typeof s.desc === "string" ? s.desc.slice(0, 400) : "",
-            portrait: typeof s.portrait === "string" ? s.portrait : null,
-          }));
+        if (parsed.points && typeof parsed.points === "object") {
+          build.points = {};
+          for (const k in parsed.points) {
+            build.points[k] = clamp(Number(parsed.points[k]) || 0, BONUS_MIN, BONUS_MAX);
+          }
+        }
         save();
         render();
       } catch (err) {
-        alert("Could not import this file: " + err.message);
+        alert("Could not import this build: " + err.message);
       }
     };
     reader.readAsText(file);
   }
 
-  function resetBoard() {
-    if (!confirm("Reset the board to the default four attributes and clear your skills?")) return;
-    state = defaultState();
+  function resetBuild() {
+    if (!confirm("Reset all attribute values and skill points to defaults?")) return;
+    build = defaultBuild();
     save();
     render();
   }
 
   /* ---------- events ---------- */
-  $("#closeEditor").addEventListener("click", closeEditor);
-  $("#cancelEditor").addEventListener("click", closeEditor);
-  form.addEventListener("submit", submit);
-
-  editor.addEventListener("click", (e) => { if (e.target === editor) closeEditor(); });
-  document.addEventListener("keydown", (e) => {
-    if (e.key === "Escape" && !editor.hidden) closeEditor();
-  });
-
-  bonusInput.addEventListener("input", updateBonusHint);
-  attrSelect.addEventListener("change", () => { updateBonusHint(); applyEditorAccent(); });
-
-  portraitInput.addEventListener("change", (e) => {
-    if (e.target.files[0]) handleFile(e.target.files[0]);
-    portraitInput.value = "";
-  });
-  clearPortrait.addEventListener("click", () => setDraftPortrait(null));
-
-  ["dragenter", "dragover"].forEach((evt) =>
-    portraitFrame.addEventListener(evt, (e) => { e.preventDefault(); portraitFrame.classList.add("dragover"); }));
-  ["dragleave", "drop"].forEach((evt) =>
-    portraitFrame.addEventListener(evt, (e) => { e.preventDefault(); portraitFrame.classList.remove("dragover"); }));
-  portraitFrame.addEventListener("drop", (e) => {
-    const file = e.dataTransfer.files[0];
-    if (file) handleFile(file);
-  });
-
-  $("#exportBtn").addEventListener("click", exportState);
+  $("#exportBtn").addEventListener("click", exportBuild);
   $("#importBtn").addEventListener("click", () => importFile.click());
-  $("#resetBtn").addEventListener("click", resetBoard);
+  $("#resetBtn").addEventListener("click", resetBuild);
   importFile.addEventListener("change", (e) => {
-    if (e.target.files[0]) importState(e.target.files[0]);
+    if (e.target.files[0]) importBuild(e.target.files[0]);
     importFile.value = "";
   });
 
