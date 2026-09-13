@@ -64,7 +64,7 @@ html, body {
   padding: 26px 24px 22px;
   display: grid;
   grid-template-columns: 1fr auto;
-  grid-template-areas: "word actions" "tag actions";
+  grid-template-areas: "word actions";
   align-items: center;
   gap: 2px 18px;
 }
@@ -78,13 +78,6 @@ html, body {
   font-size: 1.7rem;
   color: var(--gold);
   text-shadow: 0 1px 0 #000;
-}
-.tagline {
-  grid-area: tag;
-  margin: 2px 0 0;
-  font-style: italic;
-  font-size: 1.15rem;
-  color: var(--ink-dim);
 }
 .topbar-actions {
   grid-area: actions;
@@ -332,19 +325,8 @@ html, body {
   pointer-events: none;
 }
 
-/* ---------- footer hint ---------- */
-.hint {
-  position: relative; z-index: 2;
-  max-width: 1180px; margin: 0 auto; padding: 6px 24px 60px;
-  font-style: italic; color: var(--ink-faint); font-size: 1.05rem;
-}
-.hint code {
-  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-style: normal; font-size: 0.9em; color: var(--gold);
-}
-
 /* ---------- responsive ---------- */
 @media (max-width: 560px) {
-  .topbar-inner { grid-template-columns: 1fr; grid-template-areas: "word" "tag" "actions"; }
+  .topbar-inner { grid-template-columns: 1fr; grid-template-areas: "word" "actions"; }
   .topbar-actions { justify-content: flex-start; margin-top: 12px; }
 }

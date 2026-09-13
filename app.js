@@ -38,7 +38,6 @@
   const $ = (sel) => document.querySelector(sel);
   const board = $("#board");
   const tooltip = $("#tooltip");
-  const importFile = $("#importFile");
 
   const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
   const skillKey = (slot, i) => `${slot}-${i}`;
@@ -308,17 +307,7 @@
   }
   window.addEventListener("scroll", hideTooltip, true);
 
-  /* ---------- export / import / reset (build only) ---------- */
-  function exportBuild() {
-    const blob = new Blob([JSON.stringify(build, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "skill-build.json";
-    a.click();
-    URL.revokeObjectURL(url);
-  }
-
+  /* ---------- export image / reset ---------- */
   /* Render the whole board to a PNG and download it. */
   async function exportImage() {
     const PAD = 44, GAP = 28, CARD_W = 150, CARD_H = 200;
@@ -460,35 +449,6 @@
     }
   }
 
-  function importBuild(file) {
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(reader.result);
-        if (!parsed || typeof parsed !== "object") throw new Error("Not a build file.");
-        build = defaultBuild();
-        if (parsed.values) {
-          for (const slot in build.values) {
-            if (typeof parsed.values[slot] === "number") {
-              build.values[slot] = clamp(parsed.values[slot], ATTR_VALUE_MIN, ATTR_VALUE_MAX);
-            }
-          }
-        }
-        if (parsed.points && typeof parsed.points === "object") {
-          build.points = {};
-          for (const k in parsed.points) {
-            build.points[k] = clamp(Number(parsed.points[k]) || 0, BONUS_MIN, BONUS_MAX);
-          }
-        }
-        save();
-        render();
-      } catch (err) {
-        alert("Could not import this build: " + err.message);
-      }
-    };
-    reader.readAsText(file);
-  }
-
   function resetBuild() {
     if (!confirm("Reset all attribute values and skill points to defaults?")) return;
     build = defaultBuild();
@@ -497,14 +457,8 @@
   }
 
   /* ---------- events ---------- */
-  $("#exportBtn").addEventListener("click", exportBuild);
   $("#exportImgBtn").addEventListener("click", exportImage);
-  $("#importBtn").addEventListener("click", () => importFile.click());
   $("#resetBtn").addEventListener("click", resetBuild);
-  importFile.addEventListener("change", (e) => {
-    if (e.target.files[0]) importBuild(e.target.files[0]);
-    importFile.value = "";
-  });
 
   /* ---------- first paint ---------- */
   render();

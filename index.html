@@ -15,13 +15,9 @@
   <header class="topbar">
     <div class="topbar-inner">
       <h1 class="wordmark">Skill&nbsp;Builder</h1>
-      <p class="tagline">Assemble the voices in your head.</p>
       <div class="topbar-actions">
         <button id="exportImgBtn" class="btn">Export image</button>
-        <button id="exportBtn" class="btn">Export JSON</button>
-        <button id="importBtn" class="btn">Import JSON</button>
         <button id="resetBtn" class="btn">Reset</button>
-        <input type="file" id="importFile" accept="application/json" hidden />
       </div>
     </div>
   </header>
@@ -29,14 +25,6 @@
   <div class="budgets" id="budgets" aria-live="polite"></div>
 
   <main class="board" id="board" aria-live="polite"></main>
-
-  <p class="hint">
-    You have a fixed pool of attribute points and skill points (top of page), so
-    you cannot raise everything. An attribute sets how many pip slots every skill in
-    its row has. Assign skill points with a card's &minus;&nbsp;/&nbsp;+ to fill
-    those slots (never past the attribute). Hover a card for its description. Names,
-    portraits, descriptions, and the point limits are set in <code>data.js</code>.
-  </p>
 
   <!-- shared hover tooltip, positioned by script -->
   <div id="tooltip" class="tooltip" role="status" hidden></div>

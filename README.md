@@ -32,7 +32,7 @@ Those assignments (and nothing else) are saved to `localStorage`.
 
 - **Export image** renders the whole board to a PNG (needs the page served over
   http, see below).
-- **Export JSON** / **Import JSON** / **Reset** operate on the build numbers only.
+- **Reset** returns all attribute values and skill points to defaults.
 
 ## Editing content (dev-side)
 
