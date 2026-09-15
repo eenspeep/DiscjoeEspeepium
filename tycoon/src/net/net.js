@@ -1,22 +1,35 @@
-// Networking abstraction. The rest of the game talks to ONE interface and does
-// not care whether state travels over BroadcastChannel (local mode) or Supabase
-// Realtime (cloud mode). Swapping backends = swapping the adapter here.
+// Networking abstraction. The game talks to ONE interface; the adapter behind
+// it is either Supabase Realtime (cloud) or BroadcastChannel (local).
 //
-// Adapter contract:
-//   mode            "local" | "cloud"
-//   myId            stable id for this client/session
-//   connect()       -> Promise, resolves when ready
-//   getInitialShared() -> Promise<shared|null>   the current shared state, if any
-//   pushShared(shared)                          publish authoritative shared state
-//   onShared(cb)    cb(shared) whenever a remote shared update arrives
-//   setPresence(p)  publish my {name, appearance, x, y, tx, ty, facing}
-//   onPeers(cb)     cb(peers[]) whenever the set/positions of OTHER players change
+// connectNet() picks cloud when keys are present, but falls back to local mode
+// if the cloud connection can't be established (offline, Supabase down, or the
+// ?local=1 override), so the game always opens.
 
 import { SUPABASE, ROOM } from "../config.js";
 import { makeLocalNet } from "./local.js";
 import { makeSupabaseNet } from "./supabase.js";
 
-export function createNet(myId) {
-  const useCloud = !!(SUPABASE.url && SUPABASE.anonKey);
-  return useCloud ? makeSupabaseNet(myId, ROOM) : makeLocalNet(myId, ROOM);
+function withTimeout(promise, ms) {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), ms)),
+  ]);
+}
+
+export async function connectNet(myId) {
+  const forceLocal = typeof location !== "undefined" && new URLSearchParams(location.search).has("local");
+  const useCloud = !forceLocal && !!(SUPABASE.url && SUPABASE.anonKey);
+
+  if (useCloud) {
+    try {
+      const cloud = makeSupabaseNet(myId, ROOM);
+      await withTimeout(cloud.connect(), 8000);
+      return cloud;
+    } catch (e) {
+      console.warn("[joetime] cloud connect failed, using local mode:", e?.message || e);
+    }
+  }
+  const local = makeLocalNet(myId, ROOM);
+  await local.connect();
+  return local;
 }

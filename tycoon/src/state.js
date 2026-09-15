@@ -1,81 +1,116 @@
-// The game store: personal data (your identity, wallet-of-cosmetics, position)
-// lives per-browser; the shared workplace (credits, build, floor) is synced
-// through the net adapter. Also owns save/load, offline catch-up, host election,
-// and every action that spends credits.
+// The store. Personal (your Joey, wallet, gear, stats) lives per-browser; the
+// shared room (floor, furniture, team pot) syncs through the net adapter.
 
-import { TUNING } from "./config.js";
+import { TUNING, ME_KEY } from "./config.js";
 import { now, uid, clamp } from "./util.js";
-import { defaultAppearance, defaultOwned, optionOf, CATALOG } from "./appearance.js";
+import { defaultLook } from "./appearance.js";
 import {
-  MODULES, income, buyCost, upgradeCost, expandCost, canExpand,
+  income, FURNITURE, furnitureBuyCost, upgradeCost, expandCost, canExpand,
+  buildStats, SPECIALTIES, ADJECTIVES, GEAR, GEAR_SLOTS, gearOption,
+  weekStartFor, everyoneVoted, tallyVotes, proposalById, PROPOSALS,
 } from "./economy.js";
 
-const ME_KEY = "deskovania:me";
+const round2 = (n) => Math.round(n * 100) / 100;
 
 export const state = {
   me: null,
   shared: null,
-  peers: [],       // other real players (from net)
-  isHost: true,
+  peers: [],
+  isHost: true,     // only the host advances the shared pot's interest/week
   net: null,
-  dirty: false,    // shared has local changes not yet pushed
+  dirty: false,     // shared changed, needs push
+  meDirty: false,   // personal save pending
+  lastOffline: null,
 };
 
 const listeners = new Set();
 export function onChange(cb) { listeners.add(cb); return () => listeners.delete(cb); }
 function notify() { for (const cb of listeners) cb(); }
 
-// ---- personal identity ----------------------------------------------------
+// ---- personal -------------------------------------------------------------
+
+function defaultOwnedGear() {
+  const owned = {};
+  for (const slot of GEAR_SLOTS) owned[slot] = GEAR[slot].options.filter((o) => (o.price || 0) === 0).map((o) => o.id);
+  return owned;
+}
 
 function loadMe() {
   let me;
   try { me = JSON.parse(localStorage.getItem(ME_KEY)); } catch { me = null; }
   if (!me || !me.id) {
-    me = {
-      id: uid(),
-      name: "Guest-" + Math.floor(1000 + Math.random() * 9000),
-      appearance: defaultAppearance(),
-      owned: defaultOwned(),
-      pos: { x: 0, y: 0 },
-    };
+    me = { id: uid(), created: false };
   }
-  // heal older/partial saves
-  me.appearance = { ...defaultAppearance(), ...(me.appearance || {}) };
-  const owned = defaultOwned();
-  for (const slot of Object.keys(owned)) {
-    const have = new Set([...(owned[slot] || []), ...((me.owned && me.owned[slot]) || [])]);
+  // fill defaults / heal
+  me.look = { ...defaultLook(), ...(me.look || {}) };
+  me.gear = me.gear || {};
+  const owned = defaultOwnedGear();
+  for (const slot of GEAR_SLOTS) {
+    const have = new Set([...(owned[slot] || []), ...((me.gear.owned && me.gear.owned[slot]) || [])]);
     owned[slot] = [...have];
   }
-  me.owned = owned;
+  me.gear.owned = owned;
+  me.gear.equipped = { hat: "none", face: "none", hand: "none", ...(me.gear.equipped || {}) };
+  if (typeof me.credits !== "number") me.credits = TUNING.startCredits;
+  me.pos = me.pos || { x: 0, y: 0 };
   return me;
 }
 
 export function saveMe() {
-  try { localStorage.setItem(ME_KEY, JSON.stringify(state.me)); } catch {}
+  try { localStorage.setItem(ME_KEY, JSON.stringify(state.me)); state.meDirty = false; } catch {}
 }
 
-export function setName(name) {
-  state.me.name = (name || "").trim().slice(0, 16) || state.me.name;
+// Build Your Joey: lock in specialty + adjective (name + stat buff) + look.
+export function createJoey({ specialty, adjectiveWord, look }) {
+  const me = state.me;
+  const adj = ADJECTIVES.find((a) => a.word === adjectiveWord);
+  const { stats, buffs } = buildStats(specialty, adj);
+  me.specialty = SPECIALTIES[specialty] ? specialty : "brain";
+  me.adjectiveWord = adjectiveWord;
+  me.name = "JOEY " + adjectiveWord;
+  me.stats = stats;
+  me.buffs = buffs;
+  me.look = { ...defaultLook(), ...(look || {}) };
+  me.credits = TUNING.startCredits;
+  me.created = true;
+  me.lastTick = now();
+  me.lastSeen = now();
+  centerMe();
   saveMe();
   notify();
 }
 
-// ---- shared defaults ------------------------------------------------------
+function centerMe() {
+  const f = state.shared.floor;
+  state.me.pos = { x: (f.w - 1) / 2, y: (f.h - 1) / 2 };
+}
+
+// ---- shared ---------------------------------------------------------------
+
+function defaultPot() {
+  return {
+    balance: 0, contributions: {}, votes: {},
+    weekStart: weekStartFor(now()), lastInterest: now(),
+    phase: "growing", roomBuff: null, weekIndex: 0, history: [],
+  };
+}
 
 function defaultShared() {
   const { w, h } = TUNING.startFloor;
   const cx = Math.floor(w / 2), cy = Math.floor(h / 2);
-  const modules = {};
-  // seed a tiny starter office so the place isn't empty
-  modules[`${cx},${cy}`] = { type: "desk", level: 1 };
-  modules[`${cx + 1},${cy}`] = { type: "plant", level: 1 };
-  return {
-    credits: TUNING.startCredits,
-    floor: { w, h },
-    modules,
-    totalEarned: 0,
-    lastTick: now(),
-  };
+  const furniture = {};
+  furniture[`${cx},${cy}`] = { type: "chair", level: 1 };
+  furniture[`${cx + 1},${cy}`] = { type: "workbench", level: 1 };
+  furniture[`${cx},${cy + 1}`] = { type: "snacktable", level: 1 };
+  return { floor: { w, h }, furniture, pot: defaultPot() };
+}
+
+function healShared(s) {
+  if (!s.floor) s.floor = { ...TUNING.startFloor };
+  if (!s.furniture) s.furniture = {};
+  if (!s.pot) s.pot = defaultPot();
+  else s.pot = { ...defaultPot(), ...s.pot };
+  return s;
 }
 
 // ---- lifecycle ------------------------------------------------------------
@@ -85,166 +120,211 @@ export async function initState(net) {
   state.me = loadMe();
 
   const remote = await net.getInitialShared();
-  if (remote && remote.floor && remote.modules) {
-    state.shared = remote;
-    // offline catch-up is applied once, by whoever loads it, if plausible host
-    applyOfflineIncome();
+  if (remote && remote.floor) {
+    state.shared = healShared(remote);
   } else {
     state.shared = defaultShared();
-    state.dirty = true; // seed it for everyone
+    state.dirty = true;
   }
 
-  // spawn me at the center of the floor
-  state.me.pos = {
-    x: (state.shared.floor.w - 1) / 2,
-    y: (state.shared.floor.h - 1) / 2,
-  };
+  if (state.me.created) {
+    if (!state.me.pos || state.me.pos.x == null) centerMe();
+    applyOffline();
+  } else {
+    centerMe();
+  }
 
-  net.onShared((remoteShared) => {
-    if (!remoteShared) return;
-    // last-write-wins: accept the remote picture, keep rendering smooth
-    state.shared = remoteShared;
+  net.onShared((rs) => {
+    if (!rs || !rs.floor) return;
+    state.shared = healShared(rs);
     notify();
   });
-
-  net.onPeers((peers) => {
-    state.peers = peers;
-    electHost();
-    notify();
-  });
-
+  net.onPeers((peers) => { state.peers = peers; electHost(); notify(); });
   electHost();
   return state;
 }
 
 function electHost() {
-  // The host is the connected client with the smallest id. Only the host runs
-  // passive income accrual, so credits are not double-counted across clients.
   let host = true;
-  for (const p of state.peers) {
-    if (p.id && p.id < state.me.id) { host = false; break; }
-  }
+  for (const p of state.peers) if (p.id && p.id < state.me.id) { host = false; break; }
   state.isHost = host;
 }
 
-function applyOfflineIncome() {
-  const s = state.shared;
-  const elapsed = clamp((now() - (s.lastTick || now())) / 1000, 0, TUNING.offlineCapHours * 3600);
-  if (elapsed > 1) {
-    const gained = income(s) * elapsed;
-    s.credits += gained;
-    s.totalEarned += gained;
+function applyOffline() {
+  const me = state.me;
+  const elapsed = clamp((now() - (me.lastSeen || now())) / 1000, 0, TUNING.offlineCapHours * 3600);
+  if (elapsed > 5) {
+    const rate = income(me, state.shared, { passiveOnly: true });
+    const gained = round2(rate * elapsed);
+    me.credits = round2(me.credits + gained);
     state.lastOffline = { seconds: elapsed, gained };
   }
-  s.lastTick = now();
+  me.lastSeen = now();
+  me.lastTick = now();
 }
 
-// ---- economy tick (host advances credits) ---------------------------------
+// ---- ticks ----------------------------------------------------------------
 
 export function tickEconomy() {
-  const s = state.shared;
   const t = now();
-  const dt = (t - (s.lastTick || t)) / 1000;
-  s.lastTick = t;
-  if (state.isHost && dt > 0) {
-    const gained = income(s) * dt;
-    if (gained > 0) {
-      s.credits += gained;
-      s.totalEarned += gained;
+  const me = state.me;
+  if (me && me.created) {
+    const dt = (t - (me.lastTick || t)) / 1000;
+    me.lastTick = t;
+    if (dt > 0) { me.credits = round2(me.credits + income(me, state.shared) * dt); state.meDirty = true; }
+    me.lastSeen = t;
+  }
+  potTick(t);
+}
+
+function potTick(t) {
+  const pot = state.shared && state.shared.pot;
+  if (!pot || !state.isHost) return;
+  if (!pot.weekStart) pot.weekStart = weekStartFor(t);
+  const dt = (t - (pot.lastInterest || t)) / 1000;
+  pot.lastInterest = t;
+  const weekEnd = pot.weekStart + TUNING.weekMs;
+
+  if (pot.phase !== "voting") {
+    if (t < weekEnd) {
+      if (pot.balance > 0 && dt > 0) {
+        const r = TUNING.potInterestPerHour / 3600;
+        pot.balance = round2(pot.balance * Math.pow(1 + r, dt));
+        state.dirty = true;
+      }
+    } else {
+      pot.phase = "voting";
       state.dirty = true;
     }
+  } else if (everyoneVoted(pot) || t > weekEnd + TUNING.voteGraceMs) {
+    resolvePot(t);
   }
 }
 
-// Push shared to the network if something changed. Called on a cadence.
+function resolvePot(t) {
+  const pot = state.shared.pot;
+  const winnerId = tallyVotes(pot) || PROPOSALS[Math.floor(Math.random() * PROPOSALS.length)].id;
+  const prop = proposalById(winnerId);
+  pot.roomBuff = prop ? prop.roomBuff : null;
+  pot.history = (pot.history || []).slice(-5);
+  pot.history.push({ week: pot.weekIndex || 0, proposal: winnerId, spent: pot.balance });
+  pot.weekIndex = (pot.weekIndex || 0) + 1;
+  pot.balance = 0; pot.contributions = {}; pot.votes = {};
+  pot.phase = "growing"; pot.weekStart = weekStartFor(t); pot.lastInterest = t;
+  state.dirty = true;
+  flushShared(true);
+  notify();
+}
+
 export function flushShared(force = false) {
-  if (state.net && (state.dirty || force)) {
-    state.net.pushShared(state.shared);
-    state.dirty = false;
-  }
+  if (state.net && (state.dirty || force)) { state.net.pushShared(state.shared); state.dirty = false; }
 }
 
-// ---- spending actions -----------------------------------------------------
+// ---- actions --------------------------------------------------------------
 
-export function income$() { return income(state.shared); }
+export function income$() { return income(state.me, state.shared); }
 
-export function tryPlaceModule(type, gx, gy) {
-  const s = state.shared;
-  const key = `${gx},${gy}`;
-  if (!inBounds(gx, gy) || s.modules[key]) return { ok: false, why: "That tile is taken." };
-  const cost = buyCost(s, type);
-  if (s.credits < cost) return { ok: false, why: "Not enough credits." };
-  s.credits -= cost;
-  s.modules[key] = { type, level: 1 };
+export function tryPlaceFurniture(type, gx, gy) {
+  const s = state.shared, key = `${gx},${gy}`;
+  if (!inBounds(gx, gy) || s.furniture[key]) return { ok: false, why: "That tile is taken." };
+  const cost = furnitureBuyCost(s, type);
+  if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
+  spend(cost);
+  s.furniture[key] = { type, level: 1 };
   commit();
   return { ok: true };
 }
 
-export function tryUpgrade(key) {
-  const s = state.shared;
-  const mod = s.modules[key];
-  if (!mod) return { ok: false };
-  const cost = upgradeCost(mod);
-  if (s.credits < cost) return { ok: false, why: "Not enough credits." };
-  s.credits -= cost;
-  mod.level += 1;
+export function tryUpgradeFurniture(key) {
+  const f = state.shared.furniture[key];
+  if (!f) return { ok: false };
+  const cost = upgradeCost(f);
+  if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
+  spend(cost);
+  f.level += 1;
   commit();
   return { ok: true };
 }
 
-export function trySellModule(key) {
-  const s = state.shared;
-  const mod = s.modules[key];
-  if (!mod) return { ok: false };
-  const refund = Math.ceil(buyCost(s, mod.type) * 0.4);
-  delete s.modules[key];
-  s.credits += refund;
+export function trySellFurniture(key) {
+  const s = state.shared, f = s.furniture[key];
+  if (!f) return { ok: false };
+  const refund = Math.ceil(furnitureBuyCost(s, f.type) * 0.4);
+  delete s.furniture[key];
+  state.me.credits = round2(state.me.credits + refund);
+  state.meDirty = true;
   commit();
   return { ok: true, refund };
 }
 
 export function tryExpandFloor() {
   const s = state.shared;
-  if (!canExpand(s)) return { ok: false, why: "The office is at its maximum size." };
+  if (!canExpand(s)) return { ok: false, why: "The office is at max size." };
   const cost = expandCost(s);
-  if (s.credits < cost) return { ok: false, why: "Not enough credits." };
-  s.credits -= cost;
+  if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
+  spend(cost);
   s.floor = { w: s.floor.w + 1, h: s.floor.h + 1 };
   commit();
   return { ok: true };
 }
 
-export function tryBuyCosmetic(slot, id) {
-  const opt = optionOf(slot, id);
+export function tryBuyGear(slot, id) {
+  const opt = gearOption(slot, id);
   const price = opt.price || 0;
-  if (state.me.owned[slot].includes(id)) return { ok: true, already: true };
-  if (state.shared.credits < price) return { ok: false, why: "Not enough credits." };
-  state.shared.credits -= price;
-  state.me.owned[slot].push(id);
+  if (state.me.gear.owned[slot].includes(id)) return { ok: true, already: true };
+  if (state.me.credits < price) return { ok: false, why: "Not enough credits." };
+  spend(price);
+  state.me.gear.owned[slot].push(id);
   saveMe();
+  notify();
+  return { ok: true };
+}
+
+export function equipGear(slot, id) {
+  if (!state.me.gear.owned[slot].includes(id)) return { ok: false };
+  state.me.gear.equipped[slot] = id;
+  saveMe(); notify();
+  return { ok: true };
+}
+
+export function setLook(slot, id) {
+  state.me.look[slot] = id;
+  saveMe(); notify();
+}
+
+export function investPot(amount) {
+  const pot = state.shared.pot;
+  if (pot.phase === "voting") return { ok: false, why: "Voting is open; the pot is locked until it resolves." };
+  amount = Math.floor(amount);
+  if (amount <= 0) return { ok: false, why: "Invest a positive amount." };
+  if (state.me.credits < amount) return { ok: false, why: "Not enough credits." };
+  state.me.credits = round2(state.me.credits - amount);
+  state.meDirty = true;
+  pot.balance = round2(pot.balance + amount);
+  pot.contributions[state.me.id] = round2((pot.contributions[state.me.id] || 0) + amount);
   commit();
   return { ok: true };
 }
 
-export function equipCosmetic(slot, id) {
-  if (!state.me.owned[slot].includes(id)) return { ok: false };
-  state.me.appearance[slot] = id;
-  saveMe();
-  notify();
+export function votePot(proposalId) {
+  const pot = state.shared.pot;
+  if (pot.phase !== "voting") return { ok: false, why: "Voting isn't open yet." };
+  if (!(pot.contributions[state.me.id] > 0)) return { ok: false, why: "Only contributors vote. Invest next week!" };
+  pot.votes[state.me.id] = proposalId;
+  commit();
   return { ok: true };
 }
 
-function commit() {
-  state.dirty = true;
-  flushShared(true); // spends are pushed immediately so others see them fast
-  notify();
+// small helpers
+function spend(amt) {
+  state.me.credits = round2(state.me.credits - amt);
+  state.meDirty = true;
 }
-
-// ---- helpers --------------------------------------------------------------
+function commit() { state.dirty = true; flushShared(true); saveMe(); notify(); }
 
 export function inBounds(gx, gy) {
   const f = state.shared.floor;
   return gx >= 0 && gy >= 0 && gx < f.w && gy < f.h;
 }
 
-export { MODULES, buyCost, upgradeCost, expandCost, canExpand, CATALOG };
+export { FURNITURE };

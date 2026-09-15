@@ -60,11 +60,13 @@ export function makeSupabaseNet(myId, room) {
           }
         );
 
-      await new Promise((resolve) => {
-        channel.subscribe((status) => {
+      await new Promise((resolve, reject) => {
+        channel.subscribe((status, err) => {
           if (status === "SUBSCRIBED") {
             if (myPresence) channel.track(myPresence);
             resolve();
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
+            reject(err || new Error(status));
           }
         });
       });
