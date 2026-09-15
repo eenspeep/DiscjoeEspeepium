@@ -12,10 +12,11 @@
 
 export const SUPABASE = {
   // e.g. "https://abcdefgh.supabase.co"
-  url: "",
-  // The "anon" / public key. Safe to ship in a static page: it is guarded by
-  // Row Level Security (see schema.sql). Do NOT paste the service_role key.
-  anonKey: "",
+  url: "https://cmtxhsevbkrdtirxwpir.supabase.co",
+  // The client key. Safe to ship in a static page: it is guarded by Row Level
+  // Security (see schema.sql). This is the "publishable" (a.k.a. anon/public)
+  // key. Do NOT paste the service_role / secret key here.
+  anonKey: "sb_publishable_Tfe07P7ls2NLk67gRpQB-g_98KuUwCE",
 };
 
 // Which shared workplace to join. Everyone using the same room string shares
