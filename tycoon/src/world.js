@@ -4,7 +4,7 @@
 
 import { TILE_W, TILE_H, camera, project, screenToGrid } from "./iso.js";
 import { drawJoey, lookFromSeed, shade } from "./appearance.js";
-import { FURNITURE, usingKeys, wornArt, effectiveSpeedMult } from "./economy.js";
+import { FURNITURE, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isUsing } from "./economy.js";
 import { TUNING } from "./config.js";
 import { clamp, lerp, now } from "./util.js";
 import { state, inBounds, tryPlaceFurniture } from "./state.js";
@@ -12,6 +12,7 @@ import { state, inBounds, tryPlaceFurniture } from "./state.js";
 let canvas, ctx, dpr = 1;
 let buildType = null;
 let onFurnitureClick = () => {};
+let onSiteClick = () => {};
 let onTileMessage = () => {};
 const keys = new Set();
 let mouse = { sx: 0, sy: 0, gx: 0, gy: 0, over: false };
@@ -26,6 +27,7 @@ export function initWorld(canvasEl, hooks = {}) {
   canvas = canvasEl;
   ctx = canvas.getContext("2d");
   onFurnitureClick = hooks.onFurnitureClick || onFurnitureClick;
+  onSiteClick = hooks.onSiteClick || onSiteClick;
   onTileMessage = hooks.onTileMessage || onTileMessage;
 
   resize();
@@ -65,14 +67,17 @@ function onClick() {
   if (!mouse.over || !state.me.created) return;
   const gx = mouse.gx, gy = mouse.gy, key = `${gx},${gy}`;
   const f = state.shared.furniture[key];
+  const site = state.shared.sites[key];
   if (buildType) {
     if (!inBounds(gx, gy)) return onTileMessage("Outside the floor.");
-    if (f) return onTileMessage("That tile is occupied.");
+    if (f || site) return onTileMessage("That tile is occupied.");
     const r = tryPlaceFurniture(buildType, gx, gy);
     if (!r.ok) onTileMessage(r.why || "Can't build there.");
+    else onTileMessage("Build started — stand next to it to build it.");
     return;
   }
   if (f) { onFurnitureClick(key, f); return; }
+  if (site) { onSiteClick(key, site); return; }
   if (inBounds(gx, gy)) target = { x: gx, y: gy };
 }
 
@@ -169,7 +174,7 @@ function draw(t) {
       drawTile(gx, gy, (gx + gy) % 2 === 0 ? "#e9edf3" : "#dfe4ec");
 
   if (mouse.over && inBounds(mouse.gx, mouse.gy) && state.me.created) {
-    const occ = !!s.furniture[`${mouse.gx},${mouse.gy}`];
+    const occ = !!s.furniture[`${mouse.gx},${mouse.gy}`] || !!s.sites[`${mouse.gx},${mouse.gy}`];
     if (buildType) drawTile(mouse.gx, mouse.gy, occ ? "rgba(230,80,70,0.5)" : "rgba(70,190,120,0.55)");
     else drawTile(mouse.gx, mouse.gy, "rgba(90,120,220,0.35)");
   }
@@ -181,6 +186,10 @@ function draw(t) {
     const [gx, gy] = key.split(",").map(Number);
     items.push({ depth: gx + gy - 0.1, kind: "furn", gx, gy, f, key });
   }
+  for (const [key, site] of Object.entries(s.sites || {})) {
+    const [gx, gy] = key.split(",").map(Number);
+    items.push({ depth: gx + gy - 0.1, kind: "site", gx, gy, site, key });
+  }
   items.push({ depth: state.me.pos.x + state.me.pos.y, kind: "me" });
   for (const [, r] of renderPeers) items.push({ depth: r.x + r.y, kind: "peer", r });
   for (const n of npcs) items.push({ depth: n.x + n.y, kind: "npc", n });
@@ -188,6 +197,7 @@ function draw(t) {
 
   for (const it of items) {
     if (it.kind === "furn") drawFurniture(it.gx, it.gy, it.f, it.key === selectedKey, inUse.has(it.key));
+    else if (it.kind === "site") drawSite(it.gx, it.gy, it.site);
     else if (it.kind === "me") drawMe(t);
     else if (it.kind === "peer") drawPeer(it.r, t);
     else if (it.kind === "npc") drawPeer(it.n, t, true);
@@ -250,6 +260,28 @@ function drawFurniture(gx, gy, f, selected, using) {
     ctx.fillStyle = "rgba(255,255,255,0.92)";
     ctx.fillText("L" + f.level, c.p.x, c.p.y - z + 11 * camera.zoom);
   }
+}
+
+function drawSite(gx, gy, site) {
+  const def = FURNITURE[site.type], tint = TAG_TINT[def.tag] || "#9aa3af";
+  const c = tileCorners(gx, gy), z = def.h * 0.5 * camera.zoom;
+  const prog = Math.min(1, siteProgress(site) / site.work);
+  const building = state.me.created && isUsing(state.me.pos, gx, gy);
+
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = shade(tint, -16);
+  ctx.beginPath(); ctx.moveTo(c.T.x, c.T.y - z); ctx.lineTo(c.R.x, c.R.y - z); ctx.lineTo(c.B.x, c.B.y - z); ctx.lineTo(c.L.x, c.L.y - z); ctx.closePath(); ctx.fill();
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = building ? "rgba(70,200,130,0.95)" : "rgba(90,100,120,0.7)";
+  ctx.setLineDash([4, 3]); ctx.lineWidth = 2 * camera.zoom;
+  ctx.beginPath(); ctx.moveTo(c.T.x, c.T.y - z); ctx.lineTo(c.R.x, c.R.y - z); ctx.lineTo(c.B.x, c.B.y - z); ctx.lineTo(c.L.x, c.L.y - z); ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
+
+  ctx.font = `${13 * camera.zoom}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.globalAlpha = 0.7; ctx.fillText("🔨", c.p.x, c.p.y - z - 2 * camera.zoom); ctx.globalAlpha = 1;
+
+  const bw = 30 * camera.zoom, bh = 5 * camera.zoom, bx = c.p.x - bw / 2, by = c.p.y - z - 16 * camera.zoom;
+  ctx.fillStyle = "rgba(20,22,28,0.55)"; ctx.fillRect(bx, by, bw, bh);
+  ctx.fillStyle = "#46c882"; ctx.fillRect(bx, by, bw * prog, bh);
 }
 
 function drawMe(t) {

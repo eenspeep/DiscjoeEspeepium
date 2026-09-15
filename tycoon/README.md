@@ -10,8 +10,18 @@ the Skill Builder, same no-build static hosting.
 - **Build Your Joey** (required before you play): pick a specialty (**JOE BRAIN**
   or **JOE BUILD**), pick one of three random adjectives that names you
   `JOEY ___` and locks in a stat buff, and pick your look.
-- **Two stats**: BRAIN 🧠 and BUILD 🔧. Your specialty and adjective set them, and
-  they make matching-tagged furniture and gear more effective.
+- **Two stats that do different things**: BRAIN 🧠 and BUILD 🔧 (set by your
+  specialty and adjective, and they still make matching-tagged items more
+  effective). Beyond that:
+  - **BUILD builds.** Furniture and gear are no longer instant. Placing furniture
+    drops a **construction site** you finish by standing next to it; gear goes
+    into a personal **build queue**. Your BUILD stat is your work/sec. Multiple
+    Joeys standing at the same site stack their build power (roughly N× faster)
+    and **co-own** the finished furniture (only its builders can sell it).
+  - **BRAIN researches.** You start with a basic item list. Standing at **BRAIN
+    furniture** (chair, whiteboard, server) generates shared **research points**
+    that unlock higher tiers of furniture and gear for the whole room. The
+    🔬 chip in the HUD shows the current tier and progress.
 - **Everyone earns 1¢/s base.** On top of that:
   - **Furniture** (placed in the shared room) buffs you **while you stand next to
     it**. Adjacent furniture glows; you can use several pieces at once. Anyone can

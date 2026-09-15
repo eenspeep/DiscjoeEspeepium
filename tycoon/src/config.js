@@ -39,6 +39,16 @@ export const TUNING = {
 
   walkSpeed: 3.2,             // tiles/sec, before any speed buff
 
+  // BUILD: how fast you do "work" on build jobs (furniture sites + gear queue).
+  baseBuild: 1.0,            // work/sec floor for any Joey
+  buildScale: 0.5,           // extra work/sec per BUILD point
+  // BRAIN: research points earned per second per unit of adjacent BRAIN
+  // furniture value, times (1 + brain * researchStatBonus).
+  researchScale: 0.5,
+  researchStatBonus: 0.10,
+  // Cumulative room research needed to reach each tier (index = tier).
+  researchTiers: [0, 150, 600, 2000, 6000],
+
   // Team pot
   potInterestPerHour: 0.02,  // compounding while the week is "growing" (~28x/week)
   weekMs: 7 * 24 * 3600 * 1000,
