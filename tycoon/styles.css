@@ -388,3 +388,13 @@ body {
   .creator-body { flex-direction: column; align-items: center; }
   .adj-wrap { grid-template-columns: 1fr; }
 }
+
+/* ---- BUILD/BRAIN: research, locks, build queue -------------------------- */
+.schip.research { color: #7a3fb8; }
+.build-btn.locked { opacity: 0.6; filter: grayscale(0.4); }
+.build-btn.locked .b-cost { color: var(--muted); }
+.shop-row.locked { opacity: 0.6; filter: grayscale(0.4); cursor: help; }
+.queue-row { display: flex; align-items: center; gap: 10px; margin-top: 6px; padding: 6px 8px; background: var(--card-2); border-radius: 10px; }
+.queue-body { flex: 1; display: flex; flex-direction: column; gap: 4px; }
+.qbar { height: 6px; background: #dfe4ec; border-radius: 4px; overflow: hidden; }
+.qbar-fill { height: 100%; background: #c9772f; border-radius: 4px; transition: width 0.3s linear; }

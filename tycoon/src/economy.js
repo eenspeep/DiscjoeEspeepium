@@ -320,3 +320,68 @@ export function everyoneVoted(pot) {
   const votes = pot.votes || {};
   return contributors.every((pid) => votes[pid]);
 }
+
+// ---- BUILD (timed jobs + co-op sites) and BRAIN (research tree) ------------
+
+// Furniture research tier + build work (work-seconds to finish).
+const FURNITURE_BUILD = {
+  snacktable: { tier: 0, work: 6 }, cooler: { tier: 0, work: 6 },
+  chair: { tier: 0, work: 10 }, workbench: { tier: 0, work: 10 },
+  whiteboard: { tier: 1, work: 28 }, toolchest: { tier: 1, work: 28 },
+  server: { tier: 2, work: 80 }, forge: { tier: 2, work: 80 },
+};
+// Gear research tier (unlisted = tier 0). Build work derives from price.
+const ITEM_TIER = {
+  clipboard: 0, ballcap: 0, cargopants: 0, clownnose: 0, bag_small: 0, bag_med: 0,
+  shades: 1, boots: 1, nosering: 1, smart: 1, goggles: 1, mug: 1,
+  thinkcap: 2, hardhat: 2, wrench: 2, calc: 2, toolbelt: 2, vest: 2, labcoat: 2, bag_big: 2,
+  hoodie: 3, partyhat: 3, sneakers: 3, bag_wide: 3,
+};
+
+export function furnitureTier(type) { return (FURNITURE_BUILD[type] || { tier: 0 }).tier; }
+export function furnitureWork(type) { return (FURNITURE_BUILD[type] || { work: 10 }).work; }
+export function itemTier(type) { return ITEM_TIER[type] || 0; }
+export function itemWork(type) { return Math.max(3, Math.round((ITEMS[type]?.price || 0) / 25)); }
+
+export function researchTotal(shared) {
+  const c = (shared.research && shared.research.contrib) || {};
+  return Object.values(c).reduce((a, b) => a + b, 0);
+}
+export function currentTier(shared) {
+  const total = researchTotal(shared), tiers = TUNING.researchTiers;
+  let t = 0;
+  for (let i = 0; i < tiers.length; i++) if (total >= tiers[i]) t = i;
+  return t;
+}
+export function nextTier(shared) {
+  const tiers = TUNING.researchTiers, t = currentTier(shared);
+  if (t >= tiers.length - 1) return null;
+  return { tier: t + 1, need: tiers[t + 1], have: Math.floor(researchTotal(shared)) };
+}
+export function isFurnitureUnlocked(type, shared) { return furnitureTier(type) <= currentTier(shared); }
+export function isItemUnlocked(type, shared) { return itemTier(type) <= currentTier(shared); }
+
+// Your build power (work/sec) on any job.
+export function buildPower(me) {
+  const b = (me.stats && me.stats.build) || 0;
+  return TUNING.baseBuild + TUNING.buildScale * b;
+}
+
+// Research points/sec you generate right now from adjacent BRAIN furniture.
+export function rpRate(me, shared) {
+  if (!shared || !shared.furniture || !me.pos) return 0;
+  const brain = (me.stats && me.stats.brain) || 0;
+  let rp = 0;
+  for (const [key, f] of Object.entries(shared.furniture)) {
+    const [gx, gy] = key.split(",").map(Number);
+    if (FURNITURE[f.type].tag === "brain" && isUsing(me.pos, gx, gy)) {
+      rp += furnitureValue(f) * TUNING.researchScale * (1 + brain * TUNING.researchStatBonus);
+    }
+  }
+  return Math.round(rp * 100) / 100;
+}
+
+// Total progress on a construction site (sum of every contributor's work).
+export function siteProgress(site) {
+  return Object.values(site.progBy || {}).reduce((a, b) => a + b, 0);
+}

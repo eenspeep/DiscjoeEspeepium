@@ -7,12 +7,15 @@ import {
   state, onChange, income$, createJoey,
   tryUpgradeFurniture, trySellFurniture, tryExpandFloor, investPot, votePot, setLook,
   tryBuyItem, equipItem, unequipItem, moveItem, rotateItem, trySellItem,
+  cancelSite, cancelBuild,
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
   expandCost, canExpand, statScales, SPECIALTIES, ADJECTIVES, adjSummary, STATS,
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, SHOP_ORDER, itemCells, bagGrid, bagFreeCells,
+  furnitureTier, itemTier, furnitureWork, itemWork, isFurnitureUnlocked, isItemUnlocked,
+  currentTier, nextTier, researchTotal, siteProgress,
 } from "./economy.js";
 import { BASE_LOOK, drawJoey, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setSelected } from "./world.js";
@@ -33,7 +36,21 @@ export function initUI(authApi) {
   refresh();
   if (!state.me.created) openCreator();
   setInterval(renderHud, 500);
-  setInterval(() => { if (openView === "pot") renderPot(); }, 1000);
+  setInterval(() => {
+    if (openView === "pot") renderPot();
+    else if (openView === "site") renderSite();
+    else if (openView === "locker" && state.me.buildQueue.length) renderLocker();
+  }, 1000);
+  setInterval(() => {
+    if (state.justBuilt) { flash("Built: " + state.justBuilt + "!"); state.justBuilt = null; }
+    if (state.justCrafted) { flash("Crafted: " + state.justCrafted + " — in your bag."); state.justCrafted = null; }
+  }, 500);
+}
+
+function researchTitle() {
+  const nt = nextTier(state.shared);
+  if (!nt) return "Research maxed — all tiers unlocked";
+  return "Research tier " + currentTier(state.shared) + " · " + Math.floor(researchTotal(state.shared)) + "/" + nt.need + " to Tier " + nt.tier + " (use BRAIN furniture)";
 }
 
 export function flash(msg) {
@@ -48,6 +65,7 @@ function refresh() {
   if (openView === "furn") renderFurniture();
   else if (openView === "locker") renderLocker();
   else if (openView === "pot") renderPot();
+  else if (openView === "site") renderSite();
 }
 
 // ---- HUD ------------------------------------------------------------------
@@ -64,6 +82,7 @@ function renderHud() {
       me.created ? el("div", { class: "stat-chips" }, [
         el("span", { class: "schip brain", title: "BRAIN", text: STATS.brain.glyph + " " + me.stats.brain }),
         el("span", { class: "schip build", title: "BUILD", text: STATS.build.glyph + " " + me.stats.build }),
+        el("span", { class: "schip research", title: researchTitle(), text: "🔬 T" + currentTier(state.shared) }),
       ]) : null,
     ]),
     el("div", { class: "hud-right" }, [
@@ -86,7 +105,10 @@ function renderBuildbar() {
   const cursor = el("button", { class: "build-btn cursor" + (active ? "" : " active"), title: "Walk mode", onclick: () => selectBuild(null) }, [el("span", { class: "b-glyph", text: "👆" }), el("span", { class: "b-name", text: "Walk" })]);
   const btns = FURNITURE_ORDER.map((type) => {
     const def = FURNITURE[type], cost = furnitureBuyCost(s, type), afford = state.me.credits >= cost;
-    return el("button", { class: "build-btn " + (TAG_CLASS[def.tag] || "") + (active === type ? " active" : "") + (afford ? "" : " poor"), title: def.name + " — " + def.tag.toUpperCase() + ", +" + def.value + "/s while adjacent", onclick: () => selectBuild(type) },
+    const locked = !isFurnitureUnlocked(type, s);
+    if (locked) return el("button", { class: "build-btn locked", title: def.name + " — needs research Tier " + furnitureTier(type), onclick: () => flash(def.name + " needs research Tier " + furnitureTier(type) + ". Use BRAIN furniture.") },
+      [el("span", { class: "b-glyph", text: "🔒" }), el("span", { class: "b-name", text: def.name }), el("span", { class: "b-cost", text: "T" + furnitureTier(type) })]);
+    return el("button", { class: "build-btn " + (TAG_CLASS[def.tag] || "") + (active === type ? " active" : "") + (afford ? "" : " poor"), title: def.name + " — " + def.tag.toUpperCase() + ", +" + def.value + "/s adjacent · " + furnitureWork(type) + " build work", onclick: () => selectBuild(type) },
       [el("span", { class: "b-glyph", text: def.glyph }), el("span", { class: "b-name", text: def.name }), el("span", { class: "b-cost", text: fmt(cost) })]);
   });
   const expand = canExpand(s)
@@ -112,6 +134,22 @@ function renderFurniture() {
       el("button", { class: "btn primary" + (state.me.credits >= up ? "" : " poor"), onclick: () => { const r = tryUpgradeFurniture(openKey); flash(r.ok ? def.name + " upgraded." : (r.why || "Can't upgrade.")); } }, ["Upgrade — " + fmt(up)]),
       el("button", { class: "btn", onclick: () => { const r = trySellFurniture(openKey); flash(r.ok ? "Sold for " + fmt(r.refund) + "." : "Can't sell."); closePanel(); } }, ["Sell"]),
     ])
+  );
+}
+
+// ---- construction site ----------------------------------------------------
+
+export function openSite(key, site) { openKey = key; openView = "site"; setSelected(key); setBuild(null); renderBuildbar(); renderSite(); showPanel(); }
+function renderSite() {
+  const site = state.shared.sites[openKey]; if (!site) return closePanel();
+  const def = FURNITURE[site.type];
+  const pct = Math.min(100, Math.round(siteProgress(site) / site.work * 100));
+  const builders = Object.keys(site.progBy || {}).length;
+  panel.replaceChildren(
+    panelHeader("🔨 Building: " + def.name),
+    el("p", { class: "muted small", text: "Stand next to it to build. More builders finish it faster, and everyone who helps co-owns it." }),
+    stat("Progress", pct + "%"), stat("Builders so far", String(builders)), stat("Work", Math.floor(siteProgress(site)) + " / " + site.work),
+    el("div", { class: "panel-actions" }, [el("button", { class: "btn", onclick: () => { const r = cancelSite(openKey); flash(r.ok ? "Build cancelled, refunded " + fmt(r.refund) + "." : "Can't cancel."); closePanel(); } }, ["Cancel build"])])
   );
 }
 
@@ -169,14 +207,40 @@ function renderLocker() {
     kids.push(el("p", { class: "muted small", text: "Click a bag item to equip, rotate, or sell it. Click an empty square to move the selected item there. Only equipped gear buffs you." }));
   }
 
+  // personal build queue (gear)
+  if (me.buildQueue.length) {
+    kids.push(el("div", { class: "ward-label", text: "Building · BUILD speeds this up" }));
+    me.buildQueue.forEach((job, i) => {
+      const def = ITEMS[job.type];
+      const pct = job.blocked ? 100 : Math.min(100, Math.round((job.prog || 0) / job.work * 100));
+      kids.push(el("div", { class: "queue-row" }, [
+        el("span", { class: "shop-glyph", text: def.glyph }),
+        el("div", { class: "queue-body" }, [
+          el("span", { class: "shop-name", text: def.name + (job.blocked ? " — bag full!" : "") }),
+          el("div", { class: "qbar" }, [el("div", { class: "qbar-fill", style: `width:${pct}%` })]),
+        ]),
+        el("button", { class: "btn small", title: "Cancel", onclick: () => { const r = cancelBuild(i); flash(r.ok ? "Cancelled, refunded " + fmt(r.refund) + "." : "Can't cancel."); } }, ["✕"]),
+      ]));
+    });
+  }
+
   // shop
   kids.push(el("div", { class: "ward-label", text: "Shop" }));
   for (const type of SHOP_ORDER) {
     const def = ITEMS[type]; if (!def) continue;
     const ext = itemCells(type).reduce((m, c) => ({ w: Math.max(m.w, c[0] + 1), h: Math.max(m.h, c[1] + 1) }), { w: 1, h: 1 });
-    kids.push(el("button", { class: "shop-row", onclick: () => { const r = tryBuyItem(type); flash(r.ok ? "Bought " + def.name + " — it's in your bag." : (r.why || "Can't buy.")); } }, [
+    const locked = !isItemUnlocked(type, state.shared);
+    if (locked) {
+      kids.push(el("button", { class: "shop-row locked", onclick: () => flash(def.name + " needs research Tier " + itemTier(type) + ". Use BRAIN furniture.") }, [
+        el("span", { class: "shop-glyph", text: "🔒" }),
+        el("span", { class: "shop-body" }, [el("span", { class: "shop-name", text: def.name }), el("span", { class: "shop-meta muted small", text: "Research Tier " + itemTier(type) })]),
+        el("span", { class: "shop-price", text: fmt(def.price) }),
+      ]));
+      continue;
+    }
+    kids.push(el("button", { class: "shop-row", onclick: () => { const r = tryBuyItem(type); flash(r.ok ? "Building " + def.name + " (" + itemWork(type) + " work)…" : (r.why || "Can't buy.")); } }, [
       el("span", { class: "shop-glyph", text: def.glyph }),
-      el("span", { class: "shop-body" }, [el("span", { class: "shop-name", text: def.name }), el("span", { class: "shop-meta muted small", text: (itemBuffText(def) || SLOT_LABEL[def.slot] || "") + " · " + ext.w + "×" + ext.h })]),
+      el("span", { class: "shop-body" }, [el("span", { class: "shop-name", text: def.name }), el("span", { class: "shop-meta muted small", text: (itemBuffText(def) || SLOT_LABEL[def.slot] || "") + " · " + ext.w + "×" + ext.h + " · " + itemWork(type) + "w" })]),
       el("span", { class: "shop-price", text: fmt(def.price) }),
     ]));
   }

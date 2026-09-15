@@ -10,6 +10,8 @@ import {
   buildStats, SPECIALTIES, ADJECTIVES,
   ITEMS, ITEM_SLOTS, firstFit, fitsAt, itemCells, bagGrid,
   weekStartFor, everyoneVoted, tallyVotes, proposalById, PROPOSALS,
+  furnitureWork, itemWork, isFurnitureUnlocked, isItemUnlocked,
+  buildPower, rpRate, siteProgress, isUsing,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -77,6 +79,7 @@ function healMe(me) {
   me.look = { ...defaultLook(), ...(me.look || {}) };
   if (typeof me.credits !== "number") me.credits = TUNING.startCredits;
   me.pos = me.pos || { x: 0, y: 0 };
+  me.buildQueue = Array.isArray(me.buildQueue) ? me.buildQueue : [];
   healInventory(me);
   return me;
 }
@@ -124,14 +127,17 @@ function defaultPot() {
 }
 function defaultShared() {
   const { w, h } = TUNING.startFloor, cx = Math.floor(w / 2), cy = Math.floor(h / 2), furniture = {};
-  furniture[`${cx},${cy}`] = { type: "chair", level: 1 };
-  furniture[`${cx + 1},${cy}`] = { type: "workbench", level: 1 };
-  furniture[`${cx},${cy + 1}`] = { type: "snacktable", level: 1 };
-  return { floor: { w, h }, furniture, pot: defaultPot() };
+  furniture[`${cx},${cy}`] = { type: "chair", level: 1, by: [] };
+  furniture[`${cx + 1},${cy}`] = { type: "workbench", level: 1, by: [] };
+  furniture[`${cx},${cy + 1}`] = { type: "snacktable", level: 1, by: [] };
+  return { floor: { w, h }, furniture, sites: {}, research: { contrib: {} }, pot: defaultPot() };
 }
 function healShared(s) {
   if (!s.floor) s.floor = { ...TUNING.startFloor };
   if (!s.furniture) s.furniture = {};
+  if (!s.sites) s.sites = {};
+  if (!s.research) s.research = { contrib: {} };
+  if (!s.research.contrib) s.research.contrib = {};
   s.pot = s.pot ? { ...defaultPot(), ...s.pot } : defaultPot();
   return s;
 }
@@ -177,10 +183,54 @@ export function tickEconomy() {
   const t = now(), me = state.me;
   if (me && me.created) {
     const dt = (t - (me.lastTick || t)) / 1000; me.lastTick = t;
-    if (dt > 0) { me.credits = round2(me.credits + income(me, state.shared) * dt); state.meDirty = true; }
+    if (dt > 0) {
+      me.credits = round2(me.credits + income(me, state.shared) * dt);
+      state.meDirty = true;
+      buildTick(dt);
+    }
     me.lastSeen = t;
   }
   potTick(t);
+}
+
+// Advance construction sites you're helping, research from BRAIN furniture, and
+// your personal gear build queue.
+function buildTick(dt) {
+  const me = state.me, s = state.shared, power = buildPower(me);
+
+  for (const [key, site] of Object.entries(s.sites || {})) {
+    const [gx, gy] = key.split(",").map(Number);
+    if (!isUsing(me.pos, gx, gy)) continue;
+    site.progBy = site.progBy || {};
+    site.progBy[me.id] = round2((site.progBy[me.id] || 0) + power * dt);
+    state.dirty = true;
+    if (siteProgress(site) >= site.work) {
+      if (!s.furniture[key]) s.furniture[key] = { type: site.type, level: 1, by: Object.keys(site.progBy) };
+      delete s.sites[key];
+      state.justBuilt = FURNITURE[site.type] ? FURNITURE[site.type].name : site.type;
+      flushShared(true);
+    }
+  }
+
+  const rp = rpRate(me, s) * dt;
+  if (rp > 0) {
+    s.research.contrib = s.research.contrib || {};
+    s.research.contrib[me.id] = round2((s.research.contrib[me.id] || 0) + rp);
+    state.dirty = true;
+  }
+
+  const q = me.buildQueue;
+  if (q && q.length) {
+    const job = q[0];
+    if (!job.done) { job.prog = round2((job.prog || 0) + power * dt); if (job.prog >= job.work) job.done = true; }
+    if (job.done) {
+      const id = uid(); me.items[id] = { type: job.type };
+      const spot = firstFit(me, job.type);
+      if (spot) { me.bag.placements[id] = { x: spot.x, y: spot.y, rot: spot.rot }; q.shift(); state.justCrafted = ITEMS[job.type] ? ITEMS[job.type].name : job.type; }
+      else { delete me.items[id]; job.blocked = true; }
+    }
+    state.meDirty = true;
+  }
 }
 
 function potTick(t) {
@@ -220,10 +270,22 @@ function commit() { state.dirty = true; flushShared(true); saveMe(); notify(); }
 
 export function tryPlaceFurniture(type, gx, gy) {
   const s = state.shared, key = `${gx},${gy}`;
-  if (!inBounds(gx, gy) || s.furniture[key]) return { ok: false, why: "That tile is taken." };
+  if (!inBounds(gx, gy)) return { ok: false, why: "Outside the floor." };
+  if (s.furniture[key] || s.sites[key]) return { ok: false, why: "That tile is taken." };
+  if (!isFurnitureUnlocked(type, s)) return { ok: false, why: "Not researched yet — use BRAIN furniture." };
   const cost = furnitureBuyCost(s, type);
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
-  spend(cost); s.furniture[key] = { type, level: 1 }; commit(); return { ok: true };
+  spend(cost);
+  s.sites[key] = { type, work: furnitureWork(type), progBy: {}, started: now() };
+  commit();
+  return { ok: true, building: true };
+}
+
+export function cancelSite(key) {
+  const s = state.shared, site = s.sites[key]; if (!site) return { ok: false };
+  const refund = Math.ceil(furnitureBuyCost(s, site.type) * 0.4);
+  delete s.sites[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
+  return { ok: true, refund };
 }
 export function tryUpgradeFurniture(key) {
   const f = state.shared.furniture[key]; if (!f) return { ok: false };
@@ -233,6 +295,7 @@ export function tryUpgradeFurniture(key) {
 }
 export function trySellFurniture(key) {
   const s = state.shared, f = s.furniture[key]; if (!f) return { ok: false };
+  if (Array.isArray(f.by) && f.by.length && !f.by.includes(state.me.id)) return { ok: false, why: "Only its builders can sell it." };
   const refund = Math.ceil(furnitureBuyCost(s, f.type) * 0.4);
   delete s.furniture[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
   return { ok: true, refund };
@@ -249,14 +312,19 @@ export function tryExpandFloor() {
 export function tryBuyItem(type) {
   const def = ITEMS[type];
   if (!def || def.price == null) return { ok: false, why: "Not for sale." };
+  if (!isItemUnlocked(type, state.shared)) return { ok: false, why: "Not researched yet — use BRAIN furniture." };
   if (state.me.credits < def.price) return { ok: false, why: "Not enough credits." };
-  const id = uid();
-  state.me.items[id] = { type };
-  const spot = firstFit(state.me, type);
-  if (!spot) { delete state.me.items[id]; return { ok: false, why: "Your bag is full. Make room or buy a bigger bag." }; }
-  state.me.bag.placements[id] = { x: spot.x, y: spot.y, rot: spot.rot };
-  spend(def.price); saveMe(); notify();
-  return { ok: true, id };
+  spend(def.price);
+  state.me.buildQueue.push({ type, work: itemWork(type), prog: 0 });
+  saveMe(); notify();
+  return { ok: true, queued: true };
+}
+
+export function cancelBuild(index) {
+  const q = state.me.buildQueue, job = q[index]; if (!job) return { ok: false };
+  const refund = Math.ceil((ITEMS[job.type].price || 0) * 0.5);
+  q.splice(index, 1); state.me.credits = round2(state.me.credits + refund); saveMe(); notify();
+  return { ok: true, refund };
 }
 
 export function equipItem(id) {
