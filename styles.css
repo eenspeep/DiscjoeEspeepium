@@ -330,3 +330,6 @@ html, body {
   .topbar-inner { grid-template-columns: 1fr; grid-template-areas: "word" "actions"; }
   .topbar-actions { justify-content: flex-start; margin-top: 12px; }
 }
+
+/* anchor styled as a button (cross-link to the tycoon page) */
+a.btn { text-decoration: none; display: inline-block; line-height: 1; }
