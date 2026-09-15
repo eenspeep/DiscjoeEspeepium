@@ -19,7 +19,7 @@ export const ROOM = "joetime-01";
 
 // Per-browser save key. Bump the suffix to force a clean slate on a breaking
 // change to the personal save shape.
-export const ME_KEY = "joetime:me:v1";
+export const ME_KEY = "joetime:me:v2";
 
 // Economy + world tunables. Pure numbers, safe to tweak.
 export const TUNING = {

@@ -1,66 +1,105 @@
-// The store. Personal (your Joey, wallet, gear, stats) lives per-browser; the
-// shared room (floor, furniture, team pot) syncs through the net adapter.
+// The store. Personal (your Joey, wallet, stats, inventory) saves per-browser and
+// optionally to a Supabase profile (log in to recover). The shared room (floor,
+// furniture, team pot) syncs through the net adapter.
 
 import { TUNING, ME_KEY } from "./config.js";
 import { now, uid, clamp } from "./util.js";
 import { defaultLook } from "./appearance.js";
 import {
   income, FURNITURE, furnitureBuyCost, upgradeCost, expandCost, canExpand,
-  buildStats, SPECIALTIES, ADJECTIVES, GEAR, GEAR_SLOTS, gearOption,
+  buildStats, SPECIALTIES, ADJECTIVES,
+  ITEMS, ITEM_SLOTS, firstFit, fitsAt, itemCells, bagGrid,
   weekStartFor, everyoneVoted, tallyVotes, proposalById, PROPOSALS,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
 
 export const state = {
-  me: null,
-  shared: null,
-  peers: [],
-  isHost: true,     // only the host advances the shared pot's interest/week
-  net: null,
-  dirty: false,     // shared changed, needs push
-  meDirty: false,   // personal save pending
-  lastOffline: null,
+  me: null, shared: null, peers: [], isHost: true, net: null,
+  dirty: false, meDirty: false, lastOffline: null,
+  account: null,     // { userId, username } when logged in
 };
 
 const listeners = new Set();
 export function onChange(cb) { listeners.add(cb); return () => listeners.delete(cb); }
 function notify() { for (const cb of listeners) cb(); }
 
-// ---- personal -------------------------------------------------------------
+let profileSaver = null;
+export function setProfileSaver(fn) { profileSaver = fn; }
 
-function defaultOwnedGear() {
-  const owned = {};
-  for (const slot of GEAR_SLOTS) owned[slot] = GEAR[slot].options.filter((o) => (o.price || 0) === 0).map((o) => o.id);
-  return owned;
+// ---- inventory helpers ----------------------------------------------------
+
+function starterInventory() {
+  const bagUid = uid();
+  const equipment = {}; for (const s of ITEM_SLOTS) equipment[s] = null;
+  equipment.bag = bagUid;
+  return { equipment, items: { [bagUid]: { type: "bag_small" } }, bag: { placements: {} } };
+}
+
+function healInventory(me) {
+  if (!me.equipment || !me.items || !me.bag) Object.assign(me, starterInventory());
+  for (const s of ITEM_SLOTS) if (!(s in me.equipment)) me.equipment[s] = null;
+  me.bag.placements = me.bag.placements || {};
+  if (!me.equipment.bag || !me.items[me.equipment.bag]) {
+    const bagUid = uid(); me.items[bagUid] = { type: "bag_small" }; me.equipment.bag = bagUid;
+  }
+}
+
+function snapInv(me) { return JSON.stringify({ e: me.equipment, b: me.bag }); }
+function restoreInv(me, snap) { const o = JSON.parse(snap); me.equipment = o.e; me.bag = o.b; }
+
+function validateBag(me) {
+  const grid = bagGrid(me), seen = new Set();
+  for (const [id, p] of Object.entries(me.bag.placements)) {
+    const inst = me.items[id]; if (!inst) return false;
+    for (const [dx, dy] of itemCells(inst.type, p.rot || 0)) {
+      const cx = p.x + dx, cy = p.y + dy;
+      if (cx < 0 || cy < 0 || cx >= grid.w || cy >= grid.h) return false;
+      const k = cx + "," + cy; if (seen.has(k)) return false; seen.add(k);
+    }
+  }
+  return true;
+}
+
+// ---- personal identity ----------------------------------------------------
+
+function blankMe() {
+  const me = { id: uid(), created: false };
+  Object.assign(me, starterInventory());
+  me.look = defaultLook();
+  me.credits = TUNING.startCredits;
+  me.pos = { x: 0, y: 0 };
+  return me;
+}
+
+function healMe(me) {
+  if (!me || !me.id) me = blankMe();
+  me.look = { ...defaultLook(), ...(me.look || {}) };
+  if (typeof me.credits !== "number") me.credits = TUNING.startCredits;
+  me.pos = me.pos || { x: 0, y: 0 };
+  healInventory(me);
+  return me;
 }
 
 function loadMe() {
   let me;
   try { me = JSON.parse(localStorage.getItem(ME_KEY)); } catch { me = null; }
-  if (!me || !me.id) {
-    me = { id: uid(), created: false };
-  }
-  // fill defaults / heal
-  me.look = { ...defaultLook(), ...(me.look || {}) };
-  me.gear = me.gear || {};
-  const owned = defaultOwnedGear();
-  for (const slot of GEAR_SLOTS) {
-    const have = new Set([...(owned[slot] || []), ...((me.gear.owned && me.gear.owned[slot]) || [])]);
-    owned[slot] = [...have];
-  }
-  me.gear.owned = owned;
-  me.gear.equipped = { hat: "none", face: "none", hand: "none", ...(me.gear.equipped || {}) };
-  if (typeof me.credits !== "number") me.credits = TUNING.startCredits;
-  me.pos = me.pos || { x: 0, y: 0 };
-  return me;
+  return healMe(me);
 }
 
 export function saveMe() {
-  try { localStorage.setItem(ME_KEY, JSON.stringify(state.me)); state.meDirty = false; } catch {}
+  try { localStorage.setItem(ME_KEY, JSON.stringify(state.me)); } catch {}
+  state.meDirty = false;
+  if (profileSaver && state.account) profileSaver(state.me);
 }
 
-// Build Your Joey: lock in specialty + adjective (name + stat buff) + look.
+// Replace local Joey with a cloud profile after login (or start fresh if null).
+export function adoptProfile(data) {
+  if (data && data.id) { state.me = healMe(data); if (state.me.created) applyOffline(); else centerMe(); }
+  saveMe(); notify();
+}
+export function setAccount(acc) { state.account = acc; }
+
 export function createJoey({ specialty, adjectiveWord, look }) {
   const me = state.me;
   const adj = ADJECTIVES.find((a) => a.word === adjectiveWord);
@@ -68,48 +107,32 @@ export function createJoey({ specialty, adjectiveWord, look }) {
   me.specialty = SPECIALTIES[specialty] ? specialty : "brain";
   me.adjectiveWord = adjectiveWord;
   me.name = "JOEY " + adjectiveWord;
-  me.stats = stats;
-  me.buffs = buffs;
+  me.stats = stats; me.buffs = buffs;
   me.look = { ...defaultLook(), ...(look || {}) };
   me.credits = TUNING.startCredits;
   me.created = true;
-  me.lastTick = now();
-  me.lastSeen = now();
-  centerMe();
-  saveMe();
-  notify();
+  me.lastTick = now(); me.lastSeen = now();
+  centerMe(); saveMe(); notify();
 }
 
-function centerMe() {
-  const f = state.shared.floor;
-  state.me.pos = { x: (f.w - 1) / 2, y: (f.h - 1) / 2 };
-}
+function centerMe() { const f = state.shared.floor; state.me.pos = { x: (f.w - 1) / 2, y: (f.h - 1) / 2 }; }
 
 // ---- shared ---------------------------------------------------------------
 
 function defaultPot() {
-  return {
-    balance: 0, contributions: {}, votes: {},
-    weekStart: weekStartFor(now()), lastInterest: now(),
-    phase: "growing", roomBuff: null, weekIndex: 0, history: [],
-  };
+  return { balance: 0, contributions: {}, votes: {}, weekStart: weekStartFor(now()), lastInterest: now(), phase: "growing", roomBuff: null, weekIndex: 0, history: [] };
 }
-
 function defaultShared() {
-  const { w, h } = TUNING.startFloor;
-  const cx = Math.floor(w / 2), cy = Math.floor(h / 2);
-  const furniture = {};
+  const { w, h } = TUNING.startFloor, cx = Math.floor(w / 2), cy = Math.floor(h / 2), furniture = {};
   furniture[`${cx},${cy}`] = { type: "chair", level: 1 };
   furniture[`${cx + 1},${cy}`] = { type: "workbench", level: 1 };
   furniture[`${cx},${cy + 1}`] = { type: "snacktable", level: 1 };
   return { floor: { w, h }, furniture, pot: defaultPot() };
 }
-
 function healShared(s) {
   if (!s.floor) s.floor = { ...TUNING.startFloor };
   if (!s.furniture) s.furniture = {};
-  if (!s.pot) s.pot = defaultPot();
-  else s.pot = { ...defaultPot(), ...s.pot };
+  s.pot = s.pot ? { ...defaultPot(), ...s.pot } : defaultPot();
   return s;
 }
 
@@ -120,25 +143,12 @@ export async function initState(net) {
   state.me = loadMe();
 
   const remote = await net.getInitialShared();
-  if (remote && remote.floor) {
-    state.shared = healShared(remote);
-  } else {
-    state.shared = defaultShared();
-    state.dirty = true;
-  }
+  state.shared = (remote && remote.floor) ? healShared(remote) : (state.dirty = true, defaultShared());
 
-  if (state.me.created) {
-    if (!state.me.pos || state.me.pos.x == null) centerMe();
-    applyOffline();
-  } else {
-    centerMe();
-  }
+  if (state.me.created) { if (!state.me.pos || state.me.pos.x == null) centerMe(); applyOffline(); }
+  else centerMe();
 
-  net.onShared((rs) => {
-    if (!rs || !rs.floor) return;
-    state.shared = healShared(rs);
-    notify();
-  });
+  net.onShared((rs) => { if (!rs || !rs.floor) return; state.shared = healShared(rs); notify(); });
   net.onPeers((peers) => { state.peers = peers; electHost(); notify(); });
   electHost();
   return state;
@@ -154,23 +164,19 @@ function applyOffline() {
   const me = state.me;
   const elapsed = clamp((now() - (me.lastSeen || now())) / 1000, 0, TUNING.offlineCapHours * 3600);
   if (elapsed > 5) {
-    const rate = income(me, state.shared, { passiveOnly: true });
-    const gained = round2(rate * elapsed);
+    const gained = round2(income(me, state.shared, { passiveOnly: true }) * elapsed);
     me.credits = round2(me.credits + gained);
     state.lastOffline = { seconds: elapsed, gained };
   }
-  me.lastSeen = now();
-  me.lastTick = now();
+  me.lastSeen = now(); me.lastTick = now();
 }
 
 // ---- ticks ----------------------------------------------------------------
 
 export function tickEconomy() {
-  const t = now();
-  const me = state.me;
+  const t = now(), me = state.me;
   if (me && me.created) {
-    const dt = (t - (me.lastTick || t)) / 1000;
-    me.lastTick = t;
+    const dt = (t - (me.lastTick || t)) / 1000; me.lastTick = t;
     if (dt > 0) { me.credits = round2(me.credits + income(me, state.shared) * dt); state.meDirty = true; }
     me.lastSeen = t;
   }
@@ -181,24 +187,12 @@ function potTick(t) {
   const pot = state.shared && state.shared.pot;
   if (!pot || !state.isHost) return;
   if (!pot.weekStart) pot.weekStart = weekStartFor(t);
-  const dt = (t - (pot.lastInterest || t)) / 1000;
-  pot.lastInterest = t;
+  const dt = (t - (pot.lastInterest || t)) / 1000; pot.lastInterest = t;
   const weekEnd = pot.weekStart + TUNING.weekMs;
-
   if (pot.phase !== "voting") {
-    if (t < weekEnd) {
-      if (pot.balance > 0 && dt > 0) {
-        const r = TUNING.potInterestPerHour / 3600;
-        pot.balance = round2(pot.balance * Math.pow(1 + r, dt));
-        state.dirty = true;
-      }
-    } else {
-      pot.phase = "voting";
-      state.dirty = true;
-    }
-  } else if (everyoneVoted(pot) || t > weekEnd + TUNING.voteGraceMs) {
-    resolvePot(t);
-  }
+    if (t < weekEnd) { if (pot.balance > 0 && dt > 0) { const r = TUNING.potInterestPerHour / 3600; pot.balance = round2(pot.balance * Math.pow(1 + r, dt)); state.dirty = true; } }
+    else { pot.phase = "voting"; state.dirty = true; }
+  } else if (everyoneVoted(pot) || t > weekEnd + TUNING.voteGraceMs) resolvePot(t);
 }
 
 function resolvePot(t) {
@@ -211,120 +205,134 @@ function resolvePot(t) {
   pot.weekIndex = (pot.weekIndex || 0) + 1;
   pot.balance = 0; pot.contributions = {}; pot.votes = {};
   pot.phase = "growing"; pot.weekStart = weekStartFor(t); pot.lastInterest = t;
-  state.dirty = true;
-  flushShared(true);
-  notify();
+  state.dirty = true; flushShared(true); notify();
 }
 
 export function flushShared(force = false) {
   if (state.net && (state.dirty || force)) { state.net.pushShared(state.shared); state.dirty = false; }
 }
 
-// ---- actions --------------------------------------------------------------
+// ---- economy actions ------------------------------------------------------
 
 export function income$() { return income(state.me, state.shared); }
+function spend(amt) { state.me.credits = round2(state.me.credits - amt); state.meDirty = true; }
+function commit() { state.dirty = true; flushShared(true); saveMe(); notify(); }
 
 export function tryPlaceFurniture(type, gx, gy) {
   const s = state.shared, key = `${gx},${gy}`;
   if (!inBounds(gx, gy) || s.furniture[key]) return { ok: false, why: "That tile is taken." };
   const cost = furnitureBuyCost(s, type);
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
-  spend(cost);
-  s.furniture[key] = { type, level: 1 };
-  commit();
-  return { ok: true };
+  spend(cost); s.furniture[key] = { type, level: 1 }; commit(); return { ok: true };
 }
-
 export function tryUpgradeFurniture(key) {
-  const f = state.shared.furniture[key];
-  if (!f) return { ok: false };
+  const f = state.shared.furniture[key]; if (!f) return { ok: false };
   const cost = upgradeCost(f);
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
-  spend(cost);
-  f.level += 1;
-  commit();
-  return { ok: true };
+  spend(cost); f.level += 1; commit(); return { ok: true };
+}
+export function trySellFurniture(key) {
+  const s = state.shared, f = s.furniture[key]; if (!f) return { ok: false };
+  const refund = Math.ceil(furnitureBuyCost(s, f.type) * 0.4);
+  delete s.furniture[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
+  return { ok: true, refund };
+}
+export function tryExpandFloor() {
+  const s = state.shared; if (!canExpand(s)) return { ok: false, why: "The office is at max size." };
+  const cost = expandCost(s);
+  if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
+  spend(cost); s.floor = { w: s.floor.w + 1, h: s.floor.h + 1 }; commit(); return { ok: true };
 }
 
-export function trySellFurniture(key) {
-  const s = state.shared, f = s.furniture[key];
-  if (!f) return { ok: false };
-  const refund = Math.ceil(furnitureBuyCost(s, f.type) * 0.4);
-  delete s.furniture[key];
-  state.me.credits = round2(state.me.credits + refund);
-  state.meDirty = true;
-  commit();
+// ---- inventory actions ----------------------------------------------------
+
+export function tryBuyItem(type) {
+  const def = ITEMS[type];
+  if (!def || def.price == null) return { ok: false, why: "Not for sale." };
+  if (state.me.credits < def.price) return { ok: false, why: "Not enough credits." };
+  const id = uid();
+  state.me.items[id] = { type };
+  const spot = firstFit(state.me, type);
+  if (!spot) { delete state.me.items[id]; return { ok: false, why: "Your bag is full. Make room or buy a bigger bag." }; }
+  state.me.bag.placements[id] = { x: spot.x, y: spot.y, rot: spot.rot };
+  spend(def.price); saveMe(); notify();
+  return { ok: true, id };
+}
+
+export function equipItem(id) {
+  const me = state.me, inst = me.items[id]; if (!inst) return { ok: false };
+  const def = ITEMS[inst.type];
+  if (def.noEquip || !def.slot) return { ok: false, why: "Can't equip that." };
+  if (!me.bag.placements[id]) return { ok: false, why: "It must be in your bag first." };
+  const slot = def.slot, prev = me.equipment[slot], snap = snapInv(me);
+  delete me.bag.placements[id];
+  if (prev) {
+    const spot = firstFit(me, me.items[prev].type);
+    if (!spot) { restoreInv(me, snap); return { ok: false, why: "No bag room to swap that out." }; }
+    me.bag.placements[prev] = { x: spot.x, y: spot.y, rot: spot.rot };
+  }
+  me.equipment[slot] = id;
+  if (!validateBag(me)) { restoreInv(me, snap); return { ok: false, why: "That bag is too small for what you're carrying." }; }
+  saveMe(); notify(); return { ok: true };
+}
+
+export function unequipItem(slot) {
+  const me = state.me, id = me.equipment[slot]; if (!id) return { ok: false };
+  if (slot === "bag") return { ok: false, why: "You can't remove your only bag." };
+  const spot = firstFit(me, me.items[id].type);
+  if (!spot) return { ok: false, why: "No bag room to stow it." };
+  me.equipment[slot] = null; me.bag.placements[id] = { x: spot.x, y: spot.y, rot: spot.rot };
+  saveMe(); notify(); return { ok: true };
+}
+
+export function moveItem(id, x, y, rot) {
+  const me = state.me, inst = me.items[id]; if (!inst || !me.bag.placements[id]) return { ok: false };
+  if (ITEMS[inst.type].immovable) return { ok: false, why: "It won't budge." };
+  if (!fitsAt(me, inst.type, x, y, rot, id)) return { ok: false };
+  me.bag.placements[id] = { x, y, rot }; saveMe(); notify(); return { ok: true };
+}
+
+export function rotateItem(id) {
+  const me = state.me, inst = me.items[id], p = me.bag.placements[id];
+  if (!inst || !p || ITEMS[inst.type].immovable) return { ok: false };
+  const rot = ((p.rot || 0) + 1) % 4;
+  if (fitsAt(me, inst.type, p.x, p.y, rot, id)) { p.rot = rot; saveMe(); notify(); return { ok: true }; }
+  return { ok: false, why: "No room to rotate." };
+}
+
+export function trySellItem(id) {
+  const me = state.me, inst = me.items[id]; if (!inst) return { ok: false };
+  const def = ITEMS[inst.type];
+  if (def.noSell) return { ok: false, why: "You can't get rid of that." };
+  if (!me.bag.placements[id]) return { ok: false, why: "Unequip it first." };
+  const refund = Math.ceil((def.price || 0) * 0.4);
+  delete me.bag.placements[id]; delete me.items[id];
+  me.credits = round2(me.credits + refund); saveMe(); notify();
   return { ok: true, refund };
 }
 
-export function tryExpandFloor() {
-  const s = state.shared;
-  if (!canExpand(s)) return { ok: false, why: "The office is at max size." };
-  const cost = expandCost(s);
-  if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
-  spend(cost);
-  s.floor = { w: s.floor.w + 1, h: s.floor.h + 1 };
-  commit();
-  return { ok: true };
-}
+export function setLook(slot, id) { state.me.look[slot] = id; saveMe(); notify(); }
 
-export function tryBuyGear(slot, id) {
-  const opt = gearOption(slot, id);
-  const price = opt.price || 0;
-  if (state.me.gear.owned[slot].includes(id)) return { ok: true, already: true };
-  if (state.me.credits < price) return { ok: false, why: "Not enough credits." };
-  spend(price);
-  state.me.gear.owned[slot].push(id);
-  saveMe();
-  notify();
-  return { ok: true };
-}
-
-export function equipGear(slot, id) {
-  if (!state.me.gear.owned[slot].includes(id)) return { ok: false };
-  state.me.gear.equipped[slot] = id;
-  saveMe(); notify();
-  return { ok: true };
-}
-
-export function setLook(slot, id) {
-  state.me.look[slot] = id;
-  saveMe(); notify();
-}
+// ---- team pot -------------------------------------------------------------
 
 export function investPot(amount) {
   const pot = state.shared.pot;
-  if (pot.phase === "voting") return { ok: false, why: "Voting is open; the pot is locked until it resolves." };
+  if (pot.phase === "voting") return { ok: false, why: "Voting is open; the pot is locked." };
   amount = Math.floor(amount);
   if (amount <= 0) return { ok: false, why: "Invest a positive amount." };
   if (state.me.credits < amount) return { ok: false, why: "Not enough credits." };
-  state.me.credits = round2(state.me.credits - amount);
-  state.meDirty = true;
+  state.me.credits = round2(state.me.credits - amount); state.meDirty = true;
   pot.balance = round2(pot.balance + amount);
   pot.contributions[state.me.id] = round2((pot.contributions[state.me.id] || 0) + amount);
-  commit();
-  return { ok: true };
+  commit(); return { ok: true };
 }
-
 export function votePot(proposalId) {
   const pot = state.shared.pot;
   if (pot.phase !== "voting") return { ok: false, why: "Voting isn't open yet." };
   if (!(pot.contributions[state.me.id] > 0)) return { ok: false, why: "Only contributors vote. Invest next week!" };
-  pot.votes[state.me.id] = proposalId;
-  commit();
-  return { ok: true };
+  pot.votes[state.me.id] = proposalId; commit(); return { ok: true };
 }
 
-// small helpers
-function spend(amt) {
-  state.me.credits = round2(state.me.credits - amt);
-  state.meDirty = true;
-}
-function commit() { state.dirty = true; flushShared(true); saveMe(); notify(); }
-
-export function inBounds(gx, gy) {
-  const f = state.shared.floor;
-  return gx >= 0 && gy >= 0 && gx < f.w && gy < f.h;
-}
+export function inBounds(gx, gy) { const f = state.shared.floor; return gx >= 0 && gy >= 0 && gx < f.w && gy < f.h; }
 
 export { FURNITURE };
