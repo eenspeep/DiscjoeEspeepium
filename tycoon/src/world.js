@@ -4,7 +4,7 @@
 
 import { TILE_W, TILE_H, camera, project, screenToGrid } from "./iso.js";
 import { drawJoey, lookFromSeed, shade } from "./appearance.js";
-import { FURNITURE, usingKeys } from "./economy.js";
+import { FURNITURE, usingKeys, wornArt, effectiveSpeedMult } from "./economy.js";
 import { TUNING } from "./config.js";
 import { clamp, lerp, now } from "./util.js";
 import { state, inBounds, tryPlaceFurniture } from "./state.js";
@@ -81,7 +81,7 @@ function onClick() {
 function updateMe(dt) {
   const me = state.me;
   if (!me.created) { me.moving = false; return; }
-  const speed = TUNING.walkSpeed * ((me.buffs && me.buffs.speedMult) || 1);
+  const speed = TUNING.walkSpeed * effectiveSpeedMult(me);
   let dx = 0, dy = 0;
   if (keys.has("w") || keys.has("arrowup")) { dx -= 1; dy -= 1; }
   if (keys.has("s") || keys.has("arrowdown")) { dx += 1; dy += 1; }
@@ -115,7 +115,7 @@ function updatePeers(dt) {
     r.x = lerp(r.x, p.x ?? r.x, clamp(dt * 8, 0, 1));
     r.y = lerp(r.y, p.y ?? r.y, clamp(dt * 8, 0, 1));
     r.moving = Math.hypot((p.x ?? 0) - r.x, (p.y ?? 0) - r.y) > 0.02;
-    r.name = p.name; r.look = p.look; r.equipped = p.equipped;
+    r.name = p.name; r.look = p.look; r.worn = p.worn;
   }
   for (const id of renderPeers.keys()) if (!live.has(id)) renderPeers.delete(id);
 }
@@ -256,7 +256,7 @@ function drawMe(t) {
   const p = project(state.me.pos.x, state.me.pos.y, canvas);
   const using = state.me.created && usingKeys(state.me.pos, state.shared).length > 0;
   drawJoey(ctx, p.x, p.y, {
-    look: state.me.look, equipped: state.me.gear.equipped,
+    look: state.me.look, worn: wornArt(state.me),
     scale: camera.zoom, walking: state.me.moving, t, using,
     name: state.me.created ? state.me.name : "new Joey",
   });
@@ -265,7 +265,7 @@ function drawMe(t) {
 function drawPeer(r, t, isNpc = false) {
   const p = project(r.x, r.y, canvas);
   if (isNpc) ctx.globalAlpha = 0.9;
-  drawJoey(ctx, p.x, p.y, { look: r.look, equipped: r.equipped || {}, scale: camera.zoom, walking: r.moving, t, name: r.name || "JOEY" });
+  drawJoey(ctx, p.x, p.y, { look: r.look, worn: r.worn || {}, scale: camera.zoom, walking: r.moving, t, name: r.name || "JOEY" });
   ctx.globalAlpha = 1;
 }
 
@@ -273,7 +273,7 @@ function drawPeer(r, t, isNpc = false) {
 export function myPresence() {
   return {
     name: state.me.created ? state.me.name : "new Joey",
-    look: state.me.look, equipped: state.me.gear.equipped,
+    look: state.me.look, worn: wornArt(state.me),
     x: state.me.pos.x, y: state.me.pos.y, moving: !!state.me.moving,
     specialty: state.me.specialty,
   };

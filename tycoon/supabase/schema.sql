@@ -29,3 +29,26 @@ create policy "rooms update" on public.rooms for update using (true) with check 
 -- 3) Realtime: broadcast row changes so onShared() fires on every client.
 --    (Presence/avatars ride Realtime channels and need no table.)
 alter publication supabase_realtime add table public.rooms;
+
+-- 4) Per-player profiles (optional accounts). Each logged-in Joey saves here so
+--    it survives a cookie wipe / follows the player across devices. Unlike the
+--    shared room, a profile is private: only its owner can read or write it.
+create table if not exists public.profiles (
+  id          uuid primary key references auth.users on delete cascade,
+  data        jsonb not null default '{}'::jsonb,
+  updated_at  timestamptz not null default now()
+);
+
+alter table public.profiles enable row level security;
+
+drop policy if exists "own profile read"   on public.profiles;
+drop policy if exists "own profile write"  on public.profiles;
+drop policy if exists "own profile update" on public.profiles;
+
+create policy "own profile read"   on public.profiles for select using (auth.uid() = id);
+create policy "own profile write"  on public.profiles for insert with check (auth.uid() = id);
+create policy "own profile update" on public.profiles for update using (auth.uid() = id) with check (auth.uid() = id);
+
+-- Accounts also require turning OFF email confirmation in the dashboard:
+-- Authentication -> Providers -> Email -> disable "Confirm email".
+-- (Usernames map to a synthetic email, so there is no inbox to confirm.)

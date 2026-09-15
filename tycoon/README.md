@@ -16,8 +16,14 @@ the Skill Builder, same no-build static hosting.
   - **Furniture** (placed in the shared room) buffs you **while you stand next to
     it**. Adjacent furniture glows; you can use several pieces at once. Anyone can
     use anyone's furniture, so a good desk helps the whole team.
-  - **Gear** (hat / face / hand) buffs you **passively**, always on, wherever you
-    stand. Bought from your own wallet, then equipped in the Locker.
+  - **Gear** buffs you **passively**, always on, wherever you stand. Gear lives
+    in a **spatial "Tetris" bag** (starts 2×2, grows when you buy a bigger bag)
+    and equips into slots: head, eyes, nose, torso, hands, legs, feet, weapon,
+    bag. Only *equipped* gear buffs you, so bag space is the real constraint.
+    Manage it all in the **Locker**.
+- **Accounts (optional)**: play as a local guest, or log in with a
+  username/password to save your Joey to the cloud so it survives a cookie wipe
+  and follows you across devices. Login is never required to play.
 - **Personal wallet**: you earn and spend your own credits (furniture, gear,
   floor expansions).
 - **Team Pot**: invest some of your credits into a shared pot that compounds at an
@@ -48,6 +54,12 @@ one at supabase.com, run [`supabase/schema.sql`](supabase/schema.sql) in its SQL
 editor, then paste the Project URL and publishable (anon/public) key into
 `config.js`. The publishable key is safe to ship in a static page; it's guarded by
 the RLS policies in the schema. Never paste the service_role / secret key.
+
+**For accounts** (optional): in the Supabase dashboard go to
+**Authentication → Providers → Email** and turn **off** "Confirm email".
+Usernames map to a synthetic email address, so there is no inbox to confirm a
+link from. The `profiles` table + policies in `schema.sql` keep each player's
+save private to them.
 
 ## Content lives in one place
 

@@ -7,10 +7,8 @@
 // and the setup steps are in tycoon/README.md. The client library is loaded
 // from a CDN at runtime so the game keeps its no-build, static-hosting nature.
 
-import { SUPABASE } from "../config.js";
+import { getSupabase } from "./supaClient.js";
 import { now } from "../util.js";
-
-const CDN = "https://esm.sh/@supabase/supabase-js@2";
 
 export function makeSupabaseNet(myId, room) {
   let client = null;
@@ -38,11 +36,7 @@ export function makeSupabaseNet(myId, room) {
     room,
 
     async connect() {
-      const { createClient } = await import(/* @vite-ignore */ CDN);
-      client = createClient(SUPABASE.url, SUPABASE.anonKey, {
-        realtime: { params: { eventsPerSecond: 10 } },
-      });
-
+      client = await getSupabase();
       channel = client.channel(`room:${room}`, {
         config: { presence: { key: myId } },
       });
