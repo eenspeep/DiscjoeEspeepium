@@ -1,47 +1,51 @@
 // ---------------------------------------------------------------------------
-// Deskovania — configuration
+// JOE TIME — configuration
 //
-// This is the ONE file you edit to turn on real, cross-device multiplayer.
-// Leave the keys blank and the game runs in LOCAL mode: it still works, saves
-// to your browser, and is even multiplayer across browser tabs on this machine
-// (open the page twice and you will see each other move). To make the shared
-// workplace real across people and devices, create a free Supabase project and
-// paste its URL and anon (public) key below. See tycoon/README.md and
-// tycoon/supabase/schema.sql for the two-minute setup.
+// Edit THIS file to turn on real cross-device multiplayer. Leave the keys blank
+// and the game runs in LOCAL mode (saves to your browser, multiplayer across
+// tabs). Paste a Supabase URL + publishable key to make the shared room real.
+// See tycoon/README.md and tycoon/supabase/schema.sql.
 // ---------------------------------------------------------------------------
 
 export const SUPABASE = {
-  // e.g. "https://abcdefgh.supabase.co"
   url: "https://cmtxhsevbkrdtirxwpir.supabase.co",
-  // The client key. Safe to ship in a static page: it is guarded by Row Level
-  // Security (see schema.sql). This is the "publishable" (a.k.a. anon/public)
-  // key. Do NOT paste the service_role / secret key here.
+  // Client-safe "publishable" (anon/public) key, guarded by RLS. Never the
+  // service_role / secret key.
   anonKey: "sb_publishable_Tfe07P7ls2NLk67gRpQB-g_98KuUwCE",
 };
 
-// Which shared workplace to join. Everyone using the same room string shares
-// the same office, credits, and build. Change it to run a private one.
-export const ROOM = "office-01";
+// Everyone using the same room shares one office, furniture, and team pot.
+export const ROOM = "joetime-01";
 
-// Economy + world tunables. Safe to tweak; they are pure numbers.
+// Per-browser save key. Bump the suffix to force a clean slate on a breaking
+// change to the personal save shape.
+export const ME_KEY = "joetime:me:v1";
+
+// Economy + world tunables. Pure numbers, safe to tweak.
 export const TUNING = {
-  // Starting shared floor size (tiles). The floor grows as you buy expansions.
-  startFloor: { w: 8, h: 8 },
-  maxFloor: 24,
-  floorExpandCost: 500,        // cost to push the floor out by one ring
-  floorExpandGrowth: 2.4,      // each expansion costs this much more
+  baseIncome: 1.0,            // c/s every Joey earns before any buffs
+  statItemScale: 0.12,        // each BRAIN/BUILD point multiplies matching item value
+  statFlat: 0.05,             // each stat point also adds this many c/s directly
+  specialtyItemBonus: 0.20,   // your specialty makes matching-tag items +20% effective
+  adjacencyRange: 1,          // Chebyshev tiles: you "use" furniture within this range
 
-  startCredits: 50,
-  offlineCapHours: 8,          // idle income keeps accruing while away, up to this
+  startCredits: 25,
+  offlineCapHours: 8,         // idle income (base + gear only) accrues while away
 
-  // How fast avatars walk, in tiles per second.
-  walkSpeed: 3.2,
+  startFloor: { w: 9, h: 9 },
+  maxFloor: 26,
+  floorExpandCost: 400,
+  floorExpandGrowth: 2.3,
 
-  // Presence heartbeat (ms) for local cross-tab multiplayer.
+  walkSpeed: 3.2,             // tiles/sec, before any speed buff
+
+  // Team pot
+  potInterestPerHour: 0.02,  // compounding while the week is "growing" (~28x/week)
+  weekMs: 7 * 24 * 3600 * 1000,
+  voteGraceMs: 48 * 3600 * 1000, // after week end, resolve even if not everyone voted
+
   heartbeatMs: 1000,
   peerTimeoutMs: 4000,
 };
 
-// Cosmetic tick: the render loop targets 60fps but the economy only needs to
-// be recomputed a few times a second.
 export const ECON_TICK_MS = 250;

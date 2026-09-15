@@ -273,8 +273,90 @@ body {
   z-index: 99;
 }
 
+/* ---- Joe Time additions ------------------------------------------------- */
+.stat-chips { display: flex; gap: 6px; margin-top: 6px; }
+.schip {
+  background: var(--card); border-radius: 999px; padding: 4px 9px;
+  font-size: 12px; font-weight: 700; box-shadow: var(--shadow);
+}
+.schip.brain { color: #4b56b8; }
+.schip.build { color: #c9772f; }
+.badge.big { font-size: 13px; padding: 8px 12px; }
+.badge.alert, .btn.alert { background: var(--gold); color: #3a2c00; }
+
+.spec-line { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 8px; }
+
+/* build bar tag tints */
+.build-btn.t-brain { box-shadow: inset 0 -3px 0 #4b56b8; }
+.build-btn.t-build { box-shadow: inset 0 -3px 0 #c9772f; }
+.build-btn.t-neutral { box-shadow: inset 0 -3px 0 #7f8794; }
+
+/* gear + look */
+.chip-buff { font-size: 11px; font-weight: 700; color: var(--brand-ink); margin-right: 4px; }
+.ward-sub { font-size: 12px; color: var(--muted); margin: 4px 0; }
+.look-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.swatch {
+  width: 30px; height: 30px; border-radius: 8px; border: 2px solid var(--line);
+  cursor: pointer; box-shadow: inset 0 0 0 1px rgba(0,0,0,0.08);
+}
+.swatch.on { border-color: var(--ink); transform: scale(1.06); }
+
+/* team pot */
+.pot-balance { text-align: center; margin: 8px 0 12px; }
+.pot-amt { font-family: "Fredoka", sans-serif; font-size: 40px; font-weight: 700; color: var(--gold); display: block; }
+.pot-amt::before { content: "\00A2"; opacity: 0.7; }
+.pot-sub { font-size: 12px; color: var(--muted); }
+.pot-phase { text-align: center; padding: 8px; border-radius: 10px; font-weight: 600; font-size: 13px; margin-bottom: 10px; }
+.pot-phase.grow { background: #e6f4f2; color: var(--brand-ink); }
+.pot-phase.vote { background: #fff2d6; color: #8a5a00; }
+.invest-row { display: flex; gap: 8px; margin-top: 10px; }
+.invest-row .name-input { margin: 0; }
+.invest-row .btn { flex: 0 0 auto; }
+.quick-row { display: flex; gap: 6px; margin-top: 8px; }
+.qbtn { flex: 1; border: 1px solid var(--line); background: var(--card-2); border-radius: 8px; padding: 8px; font: inherit; font-weight: 600; cursor: pointer; }
+.qbtn:hover { border-color: var(--brand); }
+.prop { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; border: 2px solid var(--line); background: var(--card-2); border-radius: 12px; padding: 10px; margin-top: 8px; cursor: pointer; }
+.prop:hover { border-color: var(--brand); }
+.prop.mine { border-color: var(--brand); background: #e6f4f2; }
+.prop-glyph { font-size: 22px; }
+.prop-body { flex: 1; display: flex; flex-direction: column; }
+.prop-name { font-weight: 700; }
+.prop-tally { font-weight: 700; color: var(--brand-ink); }
+
+/* Build Your Joey */
+.creator {
+  background: var(--card); border-radius: 20px; padding: 22px;
+  width: min(720px, 94vw); max-height: 92vh; overflow-y: auto; box-shadow: var(--shadow);
+}
+.creator h2 { margin: 0 0 14px; font-size: 26px; letter-spacing: 0.04em; }
+.creator-body { display: flex; gap: 18px; }
+.creator-left { flex: 0 0 170px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.joey-preview { background: radial-gradient(120% 120% at 50% 30%, #eef2f8, #d9e0ec); border-radius: 14px; }
+.creator-right { flex: 1; min-width: 0; }
+.sect-label { font-family: "Fredoka", sans-serif; font-weight: 600; font-size: 14px; color: var(--muted); margin: 14px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; }
+.sect-label:first-child { margin-top: 0; }
+.spec-row { display: flex; gap: 10px; }
+.spec-card { flex: 1; border: 2px solid var(--line); background: var(--card-2); border-radius: 12px; padding: 12px; cursor: pointer; text-align: left; }
+.spec-card:hover { border-color: var(--brand); }
+.spec-card.on { border-color: var(--brand); background: #e6f4f2; }
+.spec-glyph { font-size: 24px; }
+.spec-name { font-family: "Fredoka", sans-serif; font-weight: 700; font-size: 16px; }
+.spec-blurb { margin: 4px 0; }
+.spec-start { font-weight: 600; color: var(--ink); }
+.adj-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
+.adj-wrap { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.adj-card { border: 2px solid var(--line); background: var(--card-2); border-radius: 12px; padding: 10px; cursor: pointer; text-align: center; }
+.adj-card:hover { border-color: var(--brand); }
+.adj-card.on { border-color: var(--brand); background: #e6f4f2; }
+.adj-word { font-family: "Fredoka", sans-serif; font-weight: 700; font-size: 14px; }
+.adj-buff { color: var(--brand-ink); font-weight: 600; margin-top: 2px; }
+.start-info { text-align: center; margin: 14px 0 4px; }
+.btn.small { padding: 6px 10px; font-size: 12px; }
+
 @media (max-width: 560px) {
   .coin-amt { font-size: 22px; }
   .build-btn { min-width: 58px; }
   .cross-link { bottom: 88px; }
+  .creator-body { flex-direction: column; align-items: center; }
+  .adj-wrap { grid-template-columns: 1fr; }
 }
