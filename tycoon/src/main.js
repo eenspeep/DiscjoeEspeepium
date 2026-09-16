@@ -6,7 +6,7 @@ import { uid } from "./util.js";
 import { connectNet } from "./net/net.js";
 import { state, initState, tickEconomy, flushShared, saveMe, setAccount, adoptProfile, setProfileSaver } from "./state.js";
 import { hasSupabase, currentUser, signIn, signUp, signOut, loadProfile, saveProfile } from "./account.js";
-import { initWorld, myPresence } from "./world.js";
+import { initWorld, myPresence, applyPush } from "./world.js";
 import { initUI, openFurniture, openSite, flash, showOffline } from "./ui.js";
 
 async function applyAuthed(acc) {
@@ -31,8 +31,13 @@ async function boot() {
     try { const acc = await currentUser(); if (acc) await applyAuthed(acc); } catch (e) { console.warn("[joetime] session resume:", e); }
   }
 
-  initWorld(document.getElementById("stage"), { onFurnitureClick: openFurniture, onSiteClick: openSite, onTileMessage: flash });
+  initWorld(document.getElementById("stage"), {
+    onFurnitureClick: openFurniture, onSiteClick: openSite, onTileMessage: flash,
+    send: (msg) => net.send && net.send(msg),
+  });
   initUI({ enabled: hasSupabase(), signIn, signUp, applyAuthed, doLogout });
+
+  if (net.onMessage) net.onMessage((m) => { if (m && m.type === "push" && m.to === myId) applyPush(m.x, m.y); });
 
   flushShared(true);
   if (state.lastOffline) showOffline(state.lastOffline);

@@ -12,6 +12,7 @@ export function makeLocalNet(myId, room) {
 
   let sharedCb = () => {};
   let peersCb = () => {};
+  let msgCb = () => {};
   const peers = new Map();     // id -> presence (+ ts)
   let myPresence = null;
 
@@ -47,6 +48,8 @@ export function makeLocalNet(myId, room) {
       } else if (msg.type === "hello") {
         // someone joined: answer so they see us immediately
         if (myPresence) chan.postMessage({ type: "presence", from: myId, peer: myPresence });
+      } else if (msg.type === "msg") {
+        msgCb(msg.payload);
       }
     };
   }
@@ -92,5 +95,8 @@ export function makeLocalNet(myId, room) {
     },
 
     onPeers(cb) { peersCb = cb; },
+
+    send(payload) { if (chan) chan.postMessage({ type: "msg", from: myId, payload }); },
+    onMessage(cb) { msgCb = cb; },
   };
 }

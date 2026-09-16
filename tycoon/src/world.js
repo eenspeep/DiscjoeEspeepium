@@ -4,7 +4,10 @@
 
 import { TILE_W, TILE_H, camera, project, screenToGrid } from "./iso.js";
 import { drawJoey, lookFromSeed, shade } from "./appearance.js";
-import { FURNITURE, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isUsing } from "./economy.js";
+import {
+  FURNITURE, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isNearFootprint,
+  footprintOf, footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt,
+} from "./economy.js";
 import { TUNING } from "./config.js";
 import { clamp, lerp, now } from "./util.js";
 import { state, inBounds, tryPlaceFurniture } from "./state.js";
@@ -14,6 +17,7 @@ let buildType = null;
 let onFurnitureClick = () => {};
 let onSiteClick = () => {};
 let onTileMessage = () => {};
+let sendMsg = null;
 const keys = new Set();
 let mouse = { sx: 0, sy: 0, gx: 0, gy: 0, over: false };
 let target = null;
@@ -29,10 +33,16 @@ export function initWorld(canvasEl, hooks = {}) {
   onFurnitureClick = hooks.onFurnitureClick || onFurnitureClick;
   onSiteClick = hooks.onSiteClick || onSiteClick;
   onTileMessage = hooks.onTileMessage || onTileMessage;
+  sendMsg = hooks.send || null;
 
   resize();
   window.addEventListener("resize", resize);
-  window.addEventListener("keydown", (e) => { if (e.target.tagName === "INPUT") return; keys.add(e.key.toLowerCase()); });
+  window.addEventListener("keydown", (e) => {
+    if (e.target.tagName === "INPUT") return;
+    const k = e.key.toLowerCase();
+    if (k === "e") { doPush(); return; }
+    keys.add(k);
+  });
   window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
 
   canvas.addEventListener("mousemove", (e) => {
@@ -65,23 +75,60 @@ function resize() {
 
 function onClick() {
   if (!mouse.over || !state.me.created) return;
-  const gx = mouse.gx, gy = mouse.gy, key = `${gx},${gy}`;
-  const f = state.shared.furniture[key];
-  const site = state.shared.sites[key];
+  const gx = mouse.gx, gy = mouse.gy;
+  const fKey = furnitureAnchorAt(state.shared, gx, gy);
+  const sKey = siteAnchorAt(state.shared, gx, gy);
   if (buildType) {
     if (!inBounds(gx, gy)) return onTileMessage("Outside the floor.");
-    if (f || site) return onTileMessage("That tile is occupied.");
     const r = tryPlaceFurniture(buildType, gx, gy);
     if (!r.ok) onTileMessage(r.why || "Can't build there.");
     else onTileMessage("Build started — stand next to it to build it.");
     return;
   }
-  if (f) { onFurnitureClick(key, f); return; }
-  if (site) { onSiteClick(key, site); return; }
+  if (fKey) { onFurnitureClick(fKey, state.shared.furniture[fKey]); return; }
+  if (sKey) { onSiteClick(sKey, state.shared.sites[sKey]); return; }
   if (inBounds(gx, gy)) target = { x: gx, y: gy };
 }
 
+// Shove the nearest adjacent person one tile away. Works locally on bots; sends
+// a push message to real peers so their own client moves them.
+function doPush() {
+  if (!state.me.created) return;
+  const cands = [];
+  for (const [id, r] of renderPeers) cands.push({ kind: "peer", id, x: r.x, y: r.y, name: r.name });
+  for (const n of npcs) cands.push({ kind: "npc", ref: n, x: n.x, y: n.y, name: n.name });
+  let best = null, bd = 1.6;
+  for (const c of cands) { const d = Math.hypot(c.x - state.me.pos.x, c.y - state.me.pos.y); if (d < bd) { bd = d; best = c; } }
+  if (!best) return onTileMessage("No one close enough to shove.");
+  const dx = best.x - state.me.pos.x, dy = best.y - state.me.pos.y;
+  const sx = Math.abs(dx) >= Math.abs(dy) ? Math.sign(dx) || 1 : 0;
+  const sy = Math.abs(dy) > Math.abs(dx) ? Math.sign(dy) : 0;
+  const tx = Math.round(best.x) + sx, ty = Math.round(best.y) + sy;
+  const f = state.shared.floor;
+  if (tx < 0 || ty < 0 || tx >= f.w || ty >= f.h) return onTileMessage("Nowhere to shove them.");
+  if (blockedTiles(state.shared).has(tx + "," + ty)) return onTileMessage("Something's in the way.");
+  if (best.kind === "npc") { best.ref.x = tx; best.ref.y = ty; best.ref.target = null; best.ref.pause = 0.6; }
+  else if (sendMsg) sendMsg({ type: "push", to: best.id, x: tx, y: ty });
+  onTileMessage("Shoved " + (best.name || "them") + "!");
+}
+
+// Received a push (from another player) — move me.
+export function applyPush(x, y) {
+  if (!state.me || !state.me.created) return;
+  const f = state.shared.floor;
+  state.me.pos.x = clamp(x, 0, f.w - 1);
+  state.me.pos.y = clamp(y, 0, f.h - 1);
+  target = null;
+}
+
 // ---- movement -------------------------------------------------------------
+
+function entityTileSet(excludeMe = true) {
+  const s = new Set();
+  for (const [, r] of renderPeers) s.add(Math.round(r.x) + "," + Math.round(r.y));
+  for (const n of npcs) s.add(Math.round(n.x) + "," + Math.round(n.y));
+  return s;
+}
 
 function updateMe(dt) {
   const me = state.me;
@@ -93,22 +140,23 @@ function updateMe(dt) {
   if (keys.has("a") || keys.has("arrowleft")) { dx -= 1; dy += 1; }
   if (keys.has("d") || keys.has("arrowright")) { dx += 1; dy -= 1; }
 
-  let moving = false;
-  if (dx || dy) {
-    target = null;
-    const len = Math.hypot(dx, dy) || 1;
-    me.pos.x += (dx / len) * speed * dt;
-    me.pos.y += (dy / len) * speed * dt;
-    moving = true;
-  } else if (target) {
+  let vx = 0, vy = 0, want = false;
+  if (dx || dy) { target = null; const len = Math.hypot(dx, dy) || 1; vx = (dx / len) * speed * dt; vy = (dy / len) * speed * dt; want = true; }
+  else if (target) {
     const ddx = target.x - me.pos.x, ddy = target.y - me.pos.y, dist = Math.hypot(ddx, ddy);
     if (dist < 0.06) target = null;
-    else { const step = Math.min(dist, speed * dt); me.pos.x += (ddx / dist) * step; me.pos.y += (ddy / dist) * step; moving = true; }
+    else { const step = Math.min(dist, speed * dt); vx = (ddx / dist) * step; vy = (ddy / dist) * step; want = true; }
   }
-  const f = state.shared.floor;
-  me.pos.x = clamp(me.pos.x, 0, f.w - 1);
-  me.pos.y = clamp(me.pos.y, 0, f.h - 1);
-  me.moving = moving;
+
+  const f = state.shared.floor, blocked = blockedTiles(state.shared), ents = entityTileSet();
+  const solid = (gx, gy) => gx < 0 || gy < 0 || gx >= f.w || gy >= f.h || blocked.has(gx + "," + gy) || ents.has(gx + "," + gy);
+  let nx = me.pos.x + vx, ny = me.pos.y + vy, movedX = vx !== 0, movedY = vy !== 0;
+  if (vx !== 0 && solid(Math.round(nx), Math.round(me.pos.y))) { nx = me.pos.x; movedX = false; }
+  if (vy !== 0 && solid(Math.round(nx), Math.round(ny))) { ny = me.pos.y; movedY = false; }
+  me.pos.x = clamp(nx, 0, f.w - 1);
+  me.pos.y = clamp(ny, 0, f.h - 1);
+  if (target && !movedX && !movedY) target = null; // stuck against something
+  me.moving = want && (movedX || movedY);
 }
 
 function updatePeers(dt) {
@@ -126,14 +174,22 @@ function updatePeers(dt) {
 }
 
 function updateNPCs(dt) {
-  const f = state.shared.floor;
+  const f = state.shared.floor, blocked = blockedTiles(state.shared);
+  const solid = (gx, gy) => gx < 0 || gy < 0 || gx >= f.w || gy >= f.h || blocked.has(gx + "," + gy);
   for (const n of npcs) {
     n.pause -= dt;
-    if (!n.target && n.pause <= 0) n.target = { x: Math.random() * (f.w - 1), y: Math.random() * (f.h - 1) };
+    if (!n.target && n.pause <= 0) n.target = { x: Math.round(Math.random() * (f.w - 1)), y: Math.round(Math.random() * (f.h - 1)) };
     if (n.target && n.pause <= 0) {
       const ddx = n.target.x - n.x, ddy = n.target.y - n.y, dist = Math.hypot(ddx, ddy);
       if (dist < 0.1) { n.target = null; n.pause = 1 + Math.random() * 4; n.moving = false; }
-      else { const step = Math.min(dist, TUNING.walkSpeed * 0.7 * dt); n.x += (ddx / dist) * step; n.y += (ddy / dist) * step; n.moving = true; }
+      else {
+        const step = Math.min(dist, TUNING.walkSpeed * 0.7 * dt);
+        let nx = n.x + (ddx / dist) * step, ny = n.y + (ddy / dist) * step, stuck = false;
+        if (solid(Math.round(nx), Math.round(n.y))) { nx = n.x; stuck = true; }
+        if (solid(Math.round(nx), Math.round(ny))) { ny = n.y; stuck = true; }
+        n.x = nx; n.y = ny; n.moving = true;
+        if (stuck) { n.target = null; n.pause = 0.5 + Math.random() * 2; }
+      }
     }
     n.x = clamp(n.x, 0, f.w - 1); n.y = clamp(n.y, 0, f.h - 1);
   }
@@ -173,22 +229,28 @@ function draw(t) {
     for (let gx = 0; gx < s.floor.w; gx++)
       drawTile(gx, gy, (gx + gy) % 2 === 0 ? "#e9edf3" : "#dfe4ec");
 
-  if (mouse.over && inBounds(mouse.gx, mouse.gy) && state.me.created) {
-    const occ = !!s.furniture[`${mouse.gx},${mouse.gy}`] || !!s.sites[`${mouse.gx},${mouse.gy}`];
-    if (buildType) drawTile(mouse.gx, mouse.gy, occ ? "rgba(230,80,70,0.5)" : "rgba(70,190,120,0.55)");
-    else drawTile(mouse.gx, mouse.gy, "rgba(90,120,220,0.35)");
+  if (mouse.over && state.me.created) {
+    if (buildType) {
+      const blocked = blockedTiles(s);
+      for (const [cx, cy] of footprintCells(buildType, mouse.gx, mouse.gy)) {
+        const ok = inBounds(cx, cy) && !blocked.has(cx + "," + cy);
+        drawTile(cx, cy, ok ? "rgba(70,190,120,0.55)" : "rgba(230,80,70,0.5)");
+      }
+    } else if (inBounds(mouse.gx, mouse.gy)) {
+      drawTile(mouse.gx, mouse.gy, "rgba(90,120,220,0.35)");
+    }
   }
 
   const inUse = state.me.created ? new Set(usingKeys(state.me.pos, s)) : new Set();
 
   const items = [];
   for (const [key, f] of Object.entries(s.furniture)) {
-    const [gx, gy] = key.split(",").map(Number);
-    items.push({ depth: gx + gy - 0.1, kind: "furn", gx, gy, f, key });
+    const [ax, ay] = key.split(",").map(Number), [w, h] = footprintOf(f.type);
+    items.push({ depth: ax + ay + (w - 1) + (h - 1) - 0.1, kind: "furn", ax, ay, f, key });
   }
   for (const [key, site] of Object.entries(s.sites || {})) {
-    const [gx, gy] = key.split(",").map(Number);
-    items.push({ depth: gx + gy - 0.1, kind: "site", gx, gy, site, key });
+    const [ax, ay] = key.split(",").map(Number), [w, h] = footprintOf(site.type);
+    items.push({ depth: ax + ay + (w - 1) + (h - 1) - 0.1, kind: "site", ax, ay, site, key });
   }
   items.push({ depth: state.me.pos.x + state.me.pos.y, kind: "me" });
   for (const [, r] of renderPeers) items.push({ depth: r.x + r.y, kind: "peer", r });
@@ -196,8 +258,8 @@ function draw(t) {
   items.sort((a, b) => a.depth - b.depth);
 
   for (const it of items) {
-    if (it.kind === "furn") drawFurniture(it.gx, it.gy, it.f, it.key === selectedKey, inUse.has(it.key));
-    else if (it.kind === "site") drawSite(it.gx, it.gy, it.site);
+    if (it.kind === "furn") drawFurniture(it.ax, it.ay, it.f, it.key === selectedKey, inUse.has(it.key));
+    else if (it.kind === "site") drawSite(it.ax, it.ay, it.site);
     else if (it.kind === "me") drawMe(t);
     else if (it.kind === "peer") drawPeer(it.r, t);
     else if (it.kind === "npc") drawPeer(it.n, t, true);
@@ -208,6 +270,17 @@ function tileCorners(gx, gy) {
   const p = project(gx, gy, canvas);
   const hw = (TILE_W / 2) * camera.zoom, hh = (TILE_H / 2) * camera.zoom;
   return { p, T: { x: p.x, y: p.y - hh }, R: { x: p.x + hw, y: p.y }, B: { x: p.x, y: p.y + hh }, L: { x: p.x - hw, y: p.y } };
+}
+
+// Outline corners of a whole w×h footprint (generalizes tileCorners for 1×1).
+function footprintCorners(ax, ay, type) {
+  const [w, h] = footprintOf(type), bx = ax + w - 1, by = ay + h - 1;
+  const hw = (TILE_W / 2) * camera.zoom, hh = (TILE_H / 2) * camera.zoom;
+  const pT = project(ax, ay, canvas), pR = project(bx, ay, canvas), pB = project(bx, by, canvas), pL = project(ax, by, canvas);
+  return {
+    p: project((ax + bx) / 2, (ay + by) / 2, canvas),
+    T: { x: pT.x, y: pT.y - hh }, R: { x: pR.x + hw, y: pR.y }, B: { x: pB.x, y: pB.y + hh }, L: { x: pL.x - hw, y: pL.y },
+  };
 }
 
 function drawTile(gx, gy, fill) {
@@ -221,10 +294,10 @@ function drawTile(gx, gy, fill) {
 
 const TAG_TINT = { brain: "#4b56b8", build: "#c9772f", neutral: "#7f8794" };
 
-function drawFurniture(gx, gy, f, selected, using) {
+function drawFurniture(ax, ay, f, selected, using) {
   const def = FURNITURE[f.type];
   const tint = TAG_TINT[def.tag] || "#9aa3af";
-  const c = tileCorners(gx, gy);
+  const c = footprintCorners(ax, ay, f.type);
   const z = def.h * camera.zoom * (1 + (f.level - 1) * 0.12);
 
   if (using) {
@@ -262,11 +335,11 @@ function drawFurniture(gx, gy, f, selected, using) {
   }
 }
 
-function drawSite(gx, gy, site) {
+function drawSite(ax, ay, site) {
   const def = FURNITURE[site.type], tint = TAG_TINT[def.tag] || "#9aa3af";
-  const c = tileCorners(gx, gy), z = def.h * 0.5 * camera.zoom;
+  const c = footprintCorners(ax, ay, site.type), z = def.h * 0.5 * camera.zoom;
   const prog = Math.min(1, siteProgress(site) / site.work);
-  const building = state.me.created && isUsing(state.me.pos, gx, gy);
+  const building = state.me.created && isNearFootprint(state.me.pos, site.type, ax, ay, TUNING.adjacencyRange);
 
   ctx.globalAlpha = 0.5;
   ctx.fillStyle = shade(tint, -16);

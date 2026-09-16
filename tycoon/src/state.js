@@ -11,8 +11,9 @@ import {
   ITEMS, ITEM_SLOTS, firstFit, fitsAt, itemCells, bagGrid,
   weekStartFor, everyoneVoted, tallyVotes, proposalById, PROPOSALS,
   furnitureWork, itemWork, itemPrice, isFurnitureUnlocked, isItemUnlocked,
-  buildPower, rpRate, soulRate, siteProgress, isUsing,
+  buildPower, rpRate, soulRate, siteProgress, isNearFootprint,
   currentTier, currentEso, furnitureTier, itemTier, esoOfFurniture, esoOfItem,
+  footprintCells, blockedTiles,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -121,7 +122,25 @@ export function createJoey({ specialty, adjectiveWord, look }) {
   centerMe(); saveMe(); notify();
 }
 
-function centerMe() { const f = state.shared.floor; state.me.pos = { x: (f.w - 1) / 2, y: (f.h - 1) / 2 }; }
+function entityTiles() {
+  const s = new Set(), m = state.me && state.me.pos;
+  if (m) s.add(Math.round(m.x) + "," + Math.round(m.y));
+  for (const p of state.peers) if (p.x != null) s.add(Math.round(p.x) + "," + Math.round(p.y));
+  return s;
+}
+function freeTileNear(gx, gy) {
+  const s = state.shared, f = s.floor, blocked = blockedTiles(s);
+  const inB = (x, y) => x >= 0 && y >= 0 && x < f.w && y < f.h;
+  if (inB(gx, gy) && !blocked.has(gx + "," + gy)) return { x: gx, y: gy };
+  for (let r = 1; r < Math.max(f.w, f.h) + 1; r++)
+    for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+      const x = gx + dx, y = gy + dy;
+      if (inB(x, y) && !blocked.has(x + "," + y)) return { x, y };
+    }
+  return { x: gx, y: gy };
+}
+function centerMe() { const f = state.shared.floor; state.me.pos = freeTileNear(Math.floor((f.w - 1) / 2), Math.floor((f.h - 1) / 2)); }
 
 // ---- shared ---------------------------------------------------------------
 
@@ -154,8 +173,12 @@ export async function initState(net) {
   const remote = await net.getInitialShared();
   state.shared = (remote && remote.floor) ? healShared(remote) : (state.dirty = true, defaultShared());
 
-  if (state.me.created) { if (!state.me.pos || state.me.pos.x == null) centerMe(); applyOffline(); }
-  else centerMe();
+  if (state.me.created) {
+    if (!state.me.pos || state.me.pos.x == null) centerMe();
+    else if (blockedTiles(state.shared).has(Math.round(state.me.pos.x) + "," + Math.round(state.me.pos.y)))
+      state.me.pos = freeTileNear(Math.round(state.me.pos.x), Math.round(state.me.pos.y));
+    applyOffline();
+  } else centerMe();
 
   net.onShared((rs) => { if (!rs || !rs.floor) return; state.shared = healShared(rs); notify(); });
   net.onPeers((peers) => { state.peers = peers; electHost(); notify(); });
@@ -205,7 +228,7 @@ function buildTick(dt) {
 
   for (const [key, site] of Object.entries(s.sites || {})) {
     const [gx, gy] = key.split(",").map(Number);
-    if (!isUsing(me.pos, gx, gy)) continue;
+    if (!isNearFootprint(me.pos, site.type, gx, gy, TUNING.adjacencyRange)) continue;
     site.progBy = site.progBy || {};
     site.progBy[me.id] = round2((site.progBy[me.id] || 0) + power * dt);
     state.dirty = true;
@@ -275,10 +298,14 @@ function commit() { state.dirty = true; flushShared(true); saveMe(); notify(); }
 
 export function tryPlaceFurniture(type, gx, gy) {
   const s = state.shared, key = `${gx},${gy}`;
-  if (!inBounds(gx, gy)) return { ok: false, why: "Outside the floor." };
-  if (s.furniture[key] || s.sites[key]) return { ok: false, why: "That tile is taken." };
   if (furnitureTier(type) > currentTier(s)) return { ok: false, why: "That tier isn't researched yet — use BRAIN furniture." };
   if (esoOfFurniture(type) > currentEso(state.me)) return { ok: false, why: "Not esoteric enough — channel SOUL at an altar." };
+  const cells = footprintCells(type, gx, gy);
+  for (const [cx, cy] of cells) if (!inBounds(cx, cy)) return { ok: false, why: "It doesn't fit on the floor here." };
+  const blocked = blockedTiles(s);
+  for (const [cx, cy] of cells) if (blocked.has(cx + "," + cy)) return { ok: false, why: "That space is taken." };
+  const occ = entityTiles();
+  for (const [cx, cy] of cells) if (occ.has(cx + "," + cy)) return { ok: false, why: "Someone's standing there." };
   const cost = furnitureBuyCost(s, type);
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
   spend(cost);

@@ -106,6 +106,42 @@ export function upgradeCost(f) { return Math.ceil(furnitureBaseCost(f.type) * 0.
 export function furnitureTier(type) { return FURNITURE[type].tier; }
 export function furnitureWork(type) { return 6 + (FURNITURE[type].tier - 1) * 8; }
 
+// ---- footprints + collision -----------------------------------------------
+// Rectangular footprints (w x h tiles), anchored at the placed tile. Default 1x1.
+const FOOTPRINT = {
+  pingpong: [2, 1], whiteboard: [2, 1], server: [2, 1], espresso: [2, 1], standdesk: [2, 1],
+  researchterm: [2, 1], printer3d: [2, 1], quantumboard: [2, 1],
+  forge: [2, 2], robotarm: [2, 2], aicluster: [2, 2], nanoforge: [2, 2], oracle: [2, 2], fabricator: [2, 2],
+  singularity: [3, 2], realitypress: [3, 2],
+};
+export function footprintOf(type) { return FOOTPRINT[type] || [1, 1]; }
+export function footprintCells(type, ax, ay) {
+  const [w, h] = footprintOf(type), out = [];
+  for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) out.push([ax + i, ay + j]);
+  return out;
+}
+export function isNearFootprint(pos, type, ax, ay, range) {
+  const px = Math.round(pos.x), py = Math.round(pos.y);
+  for (const [cx, cy] of footprintCells(type, ax, ay)) if (Math.max(Math.abs(px - cx), Math.abs(py - cy)) <= range) return true;
+  return false;
+}
+// Set of "x,y" tiles that are solid (furniture + construction sites).
+export function blockedTiles(shared) {
+  const set = new Set();
+  for (const [key, f] of Object.entries(shared.furniture || {})) { const [ax, ay] = key.split(",").map(Number); for (const [cx, cy] of footprintCells(f.type, ax, ay)) set.add(cx + "," + cy); }
+  for (const [key, s] of Object.entries(shared.sites || {})) { const [ax, ay] = key.split(",").map(Number); for (const [cx, cy] of footprintCells(s.type, ax, ay)) set.add(cx + "," + cy); }
+  return set;
+}
+// Which furniture/site anchor covers tile (gx,gy)?
+export function furnitureAnchorAt(shared, gx, gy) {
+  for (const [key, f] of Object.entries(shared.furniture || {})) { const [ax, ay] = key.split(",").map(Number); const [w, h] = footprintOf(f.type); if (gx >= ax && gx < ax + w && gy >= ay && gy < ay + h) return key; }
+  return null;
+}
+export function siteAnchorAt(shared, gx, gy) {
+  for (const [key, s] of Object.entries(shared.sites || {})) { const [ax, ay] = key.split(",").map(Number); const [w, h] = footprintOf(s.type); if (gx >= ax && gx < ax + w && gy >= ay && gy < ay + h) return key; }
+  return null;
+}
+
 // ---- gear / items (tiered) ------------------------------------------------
 // Effect is exactly one of: value (flat, unit*tierPower, tag-scaled) | mult |
 // speedMult | buildBonus (work/sec) | researchBonus (rp/sec) | grid (bag).
@@ -275,7 +311,7 @@ export function income(me, shared, { passiveOnly = false } = {}) {
   if (!passiveOnly && shared && shared.furniture && me.pos) {
     for (const [key, f] of Object.entries(shared.furniture)) {
       const [gx, gy] = key.split(",").map(Number);
-      if (isUsing(me.pos, gx, gy)) flat += scaleByTag(furnitureValue(f), FURNITURE[f.type].tag, sc);
+      if (isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange)) flat += scaleByTag(furnitureValue(f), FURNITURE[f.type].tag, sc);
     }
   }
   if (shared && shared.pot && shared.pot.roomBuff && shared.pot.roomBuff.incomeMult) multPct += shared.pot.roomBuff.incomeMult;
@@ -289,7 +325,7 @@ export function effectiveSpeedMult(me) {
 export function usingKeys(pos, shared) {
   const keys = [];
   if (!shared || !shared.furniture || !pos) return keys;
-  for (const key of Object.keys(shared.furniture)) { const [gx, gy] = key.split(",").map(Number); if (isUsing(pos, gx, gy)) keys.push(key); }
+  for (const [key, f] of Object.entries(shared.furniture)) { const [gx, gy] = key.split(",").map(Number); if (isNearFootprint(pos, f.type, gx, gy, TUNING.adjacencyRange)) keys.push(key); }
   return keys;
 }
 export function isUsing(pos, gx, gy) {
@@ -321,7 +357,7 @@ export function rpRate(me, shared) {
     const def = FURNITURE[f.type];
     // research scales with the furniture's TIER (not its factorial income), so
     // early research isn't glacial and late research isn't instant.
-    if (def.tag === "brain" && isUsing(me.pos, gx, gy)) rp += (def.tier + 0.5 * (f.level - 1)) * TUNING.researchScale * (1 + brain * TUNING.researchStatBonus);
+    if (def.tag === "brain" && isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange)) rp += (def.tier + 0.5 * (f.level - 1)) * TUNING.researchScale * (1 + brain * TUNING.researchStatBonus);
   }
   for (const def of equippedDefs(me)) if (def.researchBonus) rp += def.researchBonus;
   return Math.round(rp * 100) / 100;
@@ -376,7 +412,7 @@ export function soulRate(me, shared) {
   for (const [key, f] of Object.entries(shared.furniture)) {
     const [gx, gy] = key.split(",").map(Number);
     const def = FURNITURE[f.type];
-    if (def.soul && isUsing(me.pos, gx, gy)) base += def.soul * (1 + 0.5 * (f.level - 1));
+    if (def.soul && isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange)) base += def.soul * (1 + 0.5 * (f.level - 1));
   }
   if (base <= 0) return 0;
   let mult = 1;
