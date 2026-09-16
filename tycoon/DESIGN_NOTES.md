@@ -4,6 +4,18 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Shop menu + place-in-hand (hotbar removed) — SHIPPED
+Replaced the long bottom build-hotbar with a **Shop panel** (🛒 button in the
+HUD). Everything buyable lives there now: furniture grouped by research tier,
+node mods, doors, and Add Room. Picking an item puts it "in your hands" and
+closes the shop; the bottom bar becomes a slim "Holding: X · Put away" chip.
+You then click a tile to place it, and placement is gated to **interact range**
+(`withinReach`), with every reachable tile shaded blue while you hold something.
+You stay in place mode after each drop (buy/place several in a row); Esc or
+"Put away" clears your hands. Add Room is still instant; furniture/mods/doors are
+place-in-hand. Reach is `interactRange(me)` (base 1, extended by the interact
+trait), so you now have to walk to where you're building.
+
 ## 2026-09-16 — Visible progress bars + mobile + in-game zoom — SHIPPED
 - **Research + soul progress bars** in the HUD (under the chips). `tierProgress`
   and `esoProgress` give fill within the current tier/level; the bar shows the

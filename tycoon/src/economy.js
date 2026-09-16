@@ -64,6 +64,11 @@ export const TRAITS = {
 };
 export function traitVal(me, key) { return (me && me.traits && me.traits[key]) || 0; }
 export function interactRange(me) { return TUNING.adjacencyRange + traitVal(me, "interact"); }
+export function withinReach(me, gx, gy) {
+  if (!me || !me.pos) return false;
+  const px = Math.round(me.pos.x), py = Math.round(me.pos.y);
+  return Math.max(Math.abs(px - gx), Math.abs(py - gy)) <= interactRange(me);
+}
 export function buildRange(me) { return TUNING.adjacencyRange + traitVal(me, "buildReach"); }
 export function attackRangeFor(me) { return TUNING.attackRange + 0.5 * traitVal(me, "melee"); }
 export function weaponBonus(me) { return traitVal(me, "weapon"); }

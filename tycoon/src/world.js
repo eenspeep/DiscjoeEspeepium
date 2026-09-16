@@ -8,7 +8,7 @@ import {
   FURNITURE, MODS, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isNearFootprint,
   footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt, hasSurface,
   walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
-  attackRangeFor, interactRange, buildRange, sizeMult,
+  attackRangeFor, interactRange, buildRange, sizeMult, withinReach,
   enzoCells, isEnzoTile, enzoAnchor,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
@@ -54,6 +54,7 @@ export function initWorld(canvasEl, hooks = {}) {
     const k = e.key.toLowerCase();
     if (k === "e") { doPush(); return; }
     if (k === "q") { doAttack(); return; }
+    if (k === "escape") { setBuild(null); return; }   // drop what's in hand
     if (k === "r" && buildType) { buildRot = (buildRot + 1) % 4; return; }
     keys.add(k);
   });
@@ -360,20 +361,31 @@ function draw(t) {
   }
   for (const [gx, gy] of floorCells) drawBackWalls(s, gx, gy, walk);
 
+  // when holding something, shade every tile you can reach so the placement
+  // range is obvious (you can only build within interact range)
+  if (state.me.created && (buildType || buildMod || buildDoor)) {
+    const R = interactRange(state.me), px = Math.round(state.me.pos.x), py = Math.round(state.me.pos.y);
+    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) {
+      const x = px + dx, y = py + dy;
+      if (isWalkable(s, x, y)) drawTile(x, y, "rgba(90,160,240,0.13)");
+    }
+  }
+
   if (mouse.over && state.me.created) {
+    const reach = withinReach(state.me, mouse.gx, mouse.gy);
     if (buildType) {
       const blocked = blockedTiles(s);
       for (const [cx, cy] of footprintCells(buildType, mouse.gx, mouse.gy, buildRot)) {
-        const ok = isWalkable(s, cx, cy) && !blocked.has(cx + "," + cy) && !s.doors[cx + "," + cy];
+        const ok = reach && isWalkable(s, cx, cy) && !blocked.has(cx + "," + cy) && !s.doors[cx + "," + cy];
         drawTile(cx, cy, ok ? "rgba(70,190,120,0.55)" : "rgba(230,80,70,0.5)");
       }
     } else if (buildMod) {
       const fKey = furnitureAnchorAt(s, mouse.gx, mouse.gy);
       const f = fKey && s.furniture[fKey];
-      const ok = f && hasSurface(f.type) && !(f.mods && f.mods[mouse.gx + "," + mouse.gy]);
+      const ok = reach && f && hasSurface(f.type) && !(f.mods && f.mods[mouse.gx + "," + mouse.gy]);
       if (inBounds(mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(150,90,220,0.6)" : "rgba(230,80,70,0.45)");
     } else if (buildDoor) {
-      const ok = inHall(s, mouse.gx, mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !s.furniture[mouse.gx + "," + mouse.gy] && !s.sites[mouse.gx + "," + mouse.gy];
+      const ok = reach && inHall(s, mouse.gx, mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !s.furniture[mouse.gx + "," + mouse.gy] && !s.sites[mouse.gx + "," + mouse.gy];
       if (isWalkable(s, mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(90,160,240,0.55)" : "rgba(230,80,70,0.45)");
     } else if (isWalkable(s, mouse.gx, mouse.gy)) {
       drawTile(mouse.gx, mouse.gy, "rgba(90,120,220,0.35)");

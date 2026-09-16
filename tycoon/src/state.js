@@ -16,7 +16,7 @@ import {
   currentTier, currentEso, furnitureTier, itemTier, esoOfFurniture, esoOfItem,
   footprintCells, blockedTiles, furnitureAnchorAt, hasSurface, isModUnlocked, modPrice,
   equippedWeapon, lowestShield, blackMarkCells,
-  buildRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal,
+  buildRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal, withinReach,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -344,6 +344,7 @@ function payRefund(payerId, amount) {
 
 export function tryPlaceFurniture(type, gx, gy, rot = 0) {
   const s = state.shared, key = `${gx},${gy}`;
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand closer to place it." };
   if (furnitureTier(type) > currentTier(s)) return { ok: false, why: "That tier isn't researched yet — use BRAIN furniture." };
   if (esoOfFurniture(type) > currentEso(state.me)) return { ok: false, why: "Not esoteric enough — channel SOUL at an altar." };
   const cells = footprintCells(type, gx, gy, rot);
@@ -362,6 +363,7 @@ export function tryPlaceFurniture(type, gx, gy, rot = 0) {
 
 export function tryPlaceMod(modType, gx, gy) {
   const s = state.shared, fKey = furnitureAnchorAt(s, gx, gy);
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand closer." };
   if (!fKey) return { ok: false, why: "Mods go on furniture surfaces." };
   const f = s.furniture[fKey];
   if (!hasSurface(f.type)) return { ok: false, why: "That furniture has no surface." };
@@ -430,6 +432,7 @@ export function tryAddRoom() {
 
 export function tryPlaceDoor(gx, gy) {
   const s = state.shared, key = `${gx},${gy}`;
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand closer to the hallway." };
   if (currentTier(s) < TUNING.doorTier) return { ok: false, why: "Doors unlock at research Tier " + TUNING.doorTier + "." };
   if (!inHall(s, gx, gy)) return { ok: false, why: "Doors go in hallways." };
   if (s.doors[key]) return { ok: false, why: "There's already a door there." };
