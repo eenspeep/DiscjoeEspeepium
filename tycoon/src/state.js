@@ -153,10 +153,11 @@ function defaultPot() {
   return { balance: 0, contributions: {}, votes: {}, weekStart: weekStartFor(now()), lastInterest: now(), phase: "growing", roomBuff: null, weekIndex: 0, history: [] };
 }
 function defaultShared() {
-  const { w, h } = TUNING.startFloor, cx = Math.floor(w / 2), cy = Math.floor(h / 2), furniture = {};
-  furniture[`${cx},${cy}`] = { type: "chair", level: 1, by: [] };
-  furniture[`${cx + 1},${cy}`] = { type: "workbench", level: 1, by: [] };
-  furniture[`${cx},${cy + 1}`] = { type: "snacktable", level: 1, by: [] };
+  const { w, h } = TUNING.startFloor, furniture = {};
+  // keep the centre clear for the Enzo statue (see economy.enzoCells)
+  furniture[`1,1`] = { type: "chair", level: 1, by: [] };
+  furniture[`2,1`] = { type: "workbench", level: 1, by: [] };
+  furniture[`1,2`] = { type: "snacktable", level: 1, by: [] };
   return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, sites: {}, loot: {}, owed: {}, charlie: { alive: true, diedAt: null, lastBuy: now() }, research: { contrib: {} }, pot: defaultPot() };
 }
 function healShared(s) {
@@ -747,6 +748,14 @@ export function votePot(proposalId) {
   if (pot.phase !== "voting") return { ok: false, why: "Voting isn't open yet." };
   if (!(pot.contributions[state.me.id] > 0)) return { ok: false, why: "Only contributors vote. Invest next week!" };
   pot.votes[state.me.id] = proposalId; commit(); return { ok: true };
+}
+
+// Click the Enzo statue for a coin. Personal wallet only, no shared write.
+export function tryClickEnzo() {
+  if (!state.me || !state.me.created) return { ok: false };
+  state.me.credits = round2(state.me.credits + 1);
+  state.meDirty = true; notify();
+  return { ok: true };
 }
 
 export function inBounds(gx, gy) { const f = state.shared.floor; return gx >= f.x && gy >= f.y && gx < f.x + f.w && gy < f.y + f.h; }

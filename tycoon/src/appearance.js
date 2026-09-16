@@ -114,6 +114,75 @@ export function drawJoey(ctx, cx, cy, { look, worn = {}, scale = 1, walking = fa
   }
 }
 
+// ---- optional pixel sprites -----------------------------------------------
+// If tycoon/sprites/joey.png exists, Joeys render from it (with a palette swap
+// for the mustache + shirt) and squash as they walk. If it's missing, we fall
+// back to the procedural Joey above. enzo.png works the same way for the statue.
+// Node/tests have no Image/document, so guard and no-op there.
+const HAS_CANVAS = typeof Image !== "undefined" && typeof document !== "undefined";
+function loadSprite(src) {
+  if (!HAS_CANVAS) return { img: null, ready: () => false };
+  const img = new Image();
+  img.onload = () => {}; img.onerror = () => {};
+  img.src = src;
+  return { img, ready: () => !!img.naturalWidth };
+}
+const JOEY_SPR = loadSprite("sprites/joey.png");
+const ENZO_SPR = loadSprite("sprites/enzo.png");
+export function joeySpriteReady() { return JOEY_SPR.ready(); }
+export function enzoImage() { return ENZO_SPR.ready() ? ENZO_SPR.img : null; }
+
+// palette-swap markers baked into joey.png (author the sprite with these flats)
+const STACHE_MARK = [0xcc, 0x42, 0x0d];   // #CC420D → chosen mustache color
+const SHIRT_MARK = [0x29, 0x92, 0x12];    // #299212 → chosen shirt color
+const swapCache = new Map();
+function hexRGB(hex) { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; }
+function near(d, i, m, tol) { return Math.abs(d[i] - m[0]) <= tol && Math.abs(d[i + 1] - m[1]) <= tol && Math.abs(d[i + 2] - m[2]) <= tol; }
+function recoloredJoey(stache, shirt) {
+  if (!JOEY_SPR.ready()) return null;
+  const key = stache + "|" + shirt;
+  if (swapCache.has(key)) return swapCache.get(key);
+  const w = JOEY_SPR.img.naturalWidth, h = JOEY_SPR.img.naturalHeight;
+  const cv = document.createElement("canvas"); cv.width = w; cv.height = h;
+  const cx = cv.getContext("2d"); cx.imageSmoothingEnabled = false; cx.drawImage(JOEY_SPR.img, 0, 0);
+  const id = cx.getImageData(0, 0, w, h), d = id.data;
+  const S = hexRGB(stache), C = hexRGB(shirt), tol = 40;
+  for (let i = 0; i < d.length; i += 4) {
+    if (d[i + 3] === 0) continue;
+    if (near(d, i, STACHE_MARK, tol)) { d[i] = S[0]; d[i + 1] = S[1]; d[i + 2] = S[2]; }
+    else if (near(d, i, SHIRT_MARK, tol)) { d[i] = C[0]; d[i + 1] = C[1]; d[i + 2] = C[2]; }
+  }
+  cx.putImageData(id, 0, 0);
+  swapCache.set(key, cv);
+  if (swapCache.size > 48) swapCache.delete(swapCache.keys().next().value);
+  return cv;
+}
+function nameTag(ctx, cx, topY, name, S) {
+  ctx.save(); ctx.font = `${11 * S}px "Fredoka", system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const w = ctx.measureText(name).width + 12 * S, ny = topY - 10 * S;
+  ctx.fillStyle = "rgba(20,22,28,0.72)"; rrect(ctx, cx - w / 2, ny - 8 * S, w, 16 * S, 8 * S);
+  ctx.fillStyle = "#eef1f5"; ctx.fillText(name, cx, ny); ctx.restore();
+}
+// Returns true if it painted a sprite; false means "fall back to procedural".
+export function drawJoeySprite(ctx, cx, cy, { look, scale = 1, walking = false, t = 0, name = "", using = false } = {}) {
+  const cv = recoloredJoey(lookColor(look, "stache"), lookColor(look, "shirt"));
+  if (!cv) return false;
+  const aspect = cv.width / cv.height, H = 46 * scale, W = H * aspect;
+  // squash-and-stretch: alternate wider/shorter and taller/narrower on the walk
+  const cyc = walking ? Math.sin(t * 11) : Math.sin(t * 2.2) * 0.35;
+  const squash = (walking ? 0.15 : 0.04) * cyc;
+  const dw = W * (1 + squash), dh = H * (1 - squash);
+  const footY = cy + 12 * scale;   // feet sit on the tile, aligned with the shadow
+  ctx.save(); ctx.scale(1, 0.5);
+  if (using) { ctx.beginPath(); ctx.arc(cx, (footY - 2 * scale) / 0.5, 15 * scale, 0, 7); ctx.fillStyle = "rgba(70,190,120,0.28)"; ctx.fill(); }
+  ctx.beginPath(); ctx.arc(cx, footY / 0.5, 9 * scale, 0, 7); ctx.fillStyle = "rgba(0,0,0,0.16)"; ctx.fill();
+  ctx.restore();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(cv, cx - dw / 2, footY - dh, dw, dh);
+  if (name) nameTag(ctx, cx, footY - dh, name, scale);
+  return true;
+}
+
 function drawHead(ctx, g, S) {
   const c = g.color || "#333"; ctx.fillStyle = c;
   switch (g.art) {

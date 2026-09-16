@@ -3,22 +3,24 @@
 // you're standing next to glows to show you're "using" it.
 
 import { TILE_W, TILE_H, camera, project, screenToGrid } from "./iso.js";
-import { drawJoey, lookFromSeed, shade } from "./appearance.js";
+import { drawJoey, drawJoeySprite, enzoImage, lookFromSeed, shade } from "./appearance.js";
 import {
   FURNITURE, MODS, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isNearFootprint,
   footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt, hasSurface,
   walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
   attackRangeFor, interactRange, buildRange, sizeMult,
+  enzoCells, isEnzoTile, enzoAnchor,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, useWeapon, killCharlie, tryPickup, isCharlieAlive } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
 let buildMod = null;    // node-mod type being placed
 let buildDoor = false;  // placing a door
 let buildRot = 0;       // rotation (0..3) for furniture placement
+let enzoClickT = -9;    // last Enzo-click time, for the click pulse
 let onFurnitureClick = () => {};
 let onSiteClick = () => {};
 let onDoorClick = () => {};
@@ -94,6 +96,11 @@ function onClick() {
   const fKey = furnitureAnchorAt(state.shared, gx, gy);
   const sKey = siteAnchorAt(state.shared, gx, gy);
   const doorKey = gx + "," + gy;
+  if (isEnzoTile(state.shared, gx, gy)) {
+    const r = tryClickEnzo();
+    if (r.ok) { enzoClickT = now() / 1000; onTileMessage("🐱 Enzo blesses you (+1¢)"); }
+    return;
+  }
   if (buildDoor) {
     const r = tryPlaceDoor(gx, gy);
     onTileMessage(r.ok ? "Door installed. Click it to lock it." : (r.why || "Can't place a door there."));
@@ -342,6 +349,8 @@ function draw(t) {
     const [lx, ly] = key.split(",").map(Number);
     items.push({ depth: lx + ly - 0.03, kind: "loot", lx, ly, pile });
   }
+  const eCells = enzoCells(s);
+  items.push({ depth: cellsDepth(eCells) + 0.2, kind: "enzo", cells: eCells });
   items.push({ depth: state.me.pos.x + state.me.pos.y, kind: "me" });
   for (const [, r] of renderPeers) items.push({ depth: r.x + r.y, kind: "peer", r });
   for (const n of activeBots()) items.push({ depth: n.x + n.y, kind: "npc", n });
@@ -352,9 +361,37 @@ function draw(t) {
     else if (it.kind === "site") drawSite(it.ax, it.ay, it.site);
     else if (it.kind === "door") drawDoor(it.dx, it.dy, it.d);
     else if (it.kind === "loot") drawLoot(it.lx, it.ly, it.pile);
+    else if (it.kind === "enzo") drawEnzo(it.cells, t);
     else if (it.kind === "me") drawMe(t);
     else if (it.kind === "peer") drawPeer(it.r, t);
     else if (it.kind === "npc") drawPeer(it.n, t, true);
+  }
+}
+
+function drawEnzo(cells, t) {
+  const cen = centroid(cells), p = project(cen.x, cen.y, canvas), zoom = camera.zoom;
+  const pulse = Math.max(0, 1 - (t - enzoClickT) / 0.18);   // brief bump right after a click
+  const H = 78 * zoom * (1 + 0.09 * pulse);
+  const baseY = p.y + 8 * zoom;
+  ctx.save(); ctx.scale(1, 0.5); ctx.beginPath(); ctx.arc(p.x, (baseY + 2 * zoom) / 0.5, 22 * zoom, 0, 7); ctx.fillStyle = "rgba(0,0,0,0.2)"; ctx.fill(); ctx.restore();
+  const img = enzoImage();
+  if (img && img.naturalWidth) {
+    const W = H * (img.naturalWidth / img.naturalHeight);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, p.x - W / 2, baseY - H, W, H);
+  } else {
+    const w = 34 * zoom;
+    ctx.fillStyle = "#8b8f98"; ctx.fillRect(p.x - w / 2, baseY - H * 0.34, w, H * 0.34);
+    ctx.fillStyle = "#a7abb4"; ctx.fillRect(p.x - w / 2 + 3 * zoom, baseY - H, w - 6 * zoom, H * 0.7);
+    ctx.font = `${36 * zoom}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("🐱", p.x, baseY - H * 0.72);
+    ctx.font = `${10 * zoom}px "Fredoka", system-ui, sans-serif`; ctx.fillStyle = "#3a3f4b";
+    ctx.fillText("ENZO", p.x, baseY - H * 0.30);
+  }
+  if (pulse > 0) {
+    ctx.globalAlpha = pulse; ctx.font = `${16 * zoom}px "Fredoka", system-ui, sans-serif`;
+    ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillStyle = "#f2b134";
+    ctx.fillText("+1¢", p.x, baseY - H - 8 * zoom); ctx.globalAlpha = 1;
   }
 }
 
@@ -489,17 +526,18 @@ function drawSite(ax, ay, site) {
 function drawMe(t) {
   const p = project(state.me.pos.x, state.me.pos.y, canvas);
   const using = state.me.created && usingKeys(state.me.pos, state.shared, interactRange(state.me)).length > 0;
-  drawJoey(ctx, p.x, p.y, {
-    look: state.me.look, worn: wornArt(state.me),
-    scale: camera.zoom * (state.me.created ? sizeMult(state.me) : 1), walking: state.me.moving, t, using,
-    name: state.me.created ? state.me.name : "new Joey",
-  });
+  const opts = {
+    look: state.me.look, scale: camera.zoom * (state.me.created ? sizeMult(state.me) : 1),
+    walking: state.me.moving, t, using, name: state.me.created ? state.me.name : "new Joey",
+  };
+  if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, { ...opts, worn: wornArt(state.me) });
 }
 
 function drawPeer(r, t, isNpc = false) {
   const p = project(r.x, r.y, canvas);
   if (isNpc) ctx.globalAlpha = 0.95;
-  drawJoey(ctx, p.x, p.y, { look: r.look, worn: r.worn || {}, scale: camera.zoom * (r.size || 1), walking: r.moving, t, name: r.name || "JOEY" });
+  const opts = { look: r.look, scale: camera.zoom * (r.size || 1), walking: r.moving, t, name: r.name || "JOEY" };
+  if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, { ...opts, worn: r.worn || {} });
   ctx.globalAlpha = 1;
   if (r.id === CHARLIE_ID) {
     ctx.font = `${15 * camera.zoom}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";

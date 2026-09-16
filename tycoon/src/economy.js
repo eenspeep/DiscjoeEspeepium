@@ -224,7 +224,23 @@ export function blockedTiles(shared) {
   const set = new Set();
   for (const [key, f] of Object.entries(shared.furniture || {})) { const [ax, ay] = key.split(",").map(Number); for (const [cx, cy] of footprintCells(f.type, ax, ay, f.rot || 0)) set.add(cx + "," + cy); }
   for (const [key, s] of Object.entries(shared.sites || {})) { const [ax, ay] = key.split(",").map(Number); for (const [cx, cy] of footprintCells(s.type, ax, ay, s.rot || 0)) set.add(cx + "," + cy); }
+  for (const [cx, cy] of enzoCells(shared)) set.add(cx + "," + cy);   // Enzo statue is solid
   return set;
+}
+
+// Enzo the Cat: an indestructible 2x2 statue anchored to the main room's centre.
+// You can't build on it or walk through it — you click it for +1c.
+export function enzoAnchor(shared) {
+  const r = (shared.rooms && shared.rooms[0]) || { x: 0, y: 0, w: 9, h: 9 };
+  return [r.x + Math.floor(r.w / 2) - 1, r.y + Math.floor(r.h / 2) - 1];
+}
+export function enzoCells(shared) {
+  const [ax, ay] = enzoAnchor(shared);
+  return [[ax, ay], [ax + 1, ay], [ax, ay + 1], [ax + 1, ay + 1]];
+}
+export function isEnzoTile(shared, gx, gy) {
+  const [ax, ay] = enzoAnchor(shared);
+  return gx >= ax && gx <= ax + 1 && gy >= ay && gy <= ay + 1;
 }
 function coversTile(type, ax, ay, rot, gx, gy) {
   for (const [cx, cy] of footprintCells(type, ax, ay, rot)) if (cx === gx && cy === gy) return true;

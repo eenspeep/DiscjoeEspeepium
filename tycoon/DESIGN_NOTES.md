@@ -4,6 +4,22 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Pixel Joey sprite + Enzo statue — SHIPPED (art pending)
+Optional pixel sprites: if `tycoon/sprites/joey.png` exists, Joeys render from it
+instead of the procedural drawing, with a **palette swap** (mustache `#CC420D` →
+picked mustache color, shirt `#299212` → picked shirt color, cached per combo)
+and a **squash-and-stretch** as they walk. Missing file → procedural fallback,
+so nothing breaks. Node/tests are guarded (no Image/document). Tradeoff: the flat
+sprite does not draw equipped gear overlays (weapons/shields/hats) that the
+procedural Joey shows — revisit with gear sprites or glyphs if wanted.
+
+**Enzo the Cat statue:** an indestructible 2x2 object locked to the main room's
+centre (`enzoAnchor`/`enzoCells`). Its tiles are in `blockedTiles` so nobody can
+build on it or walk through it, and it can't be sold. Click it for **+1¢**
+(`tryClickEnzo`, personal wallet only, no shared write) with a little pulse and
+"+1¢" floater. Renders from `sprites/enzo.png`, or a gray-pedestal placeholder
+until that art lands. Starter furniture moved off-centre to clear it.
+
 ## 2026-09-16 — Paper-white skin + color-picker look — SHIPPED
 Every Joey now has fixed paper-white skin (`PAPER_WHITE`), with a faint head
 outline so it reads on light or transparent backgrounds. Skin is no longer
