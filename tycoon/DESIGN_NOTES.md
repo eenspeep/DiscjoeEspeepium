@@ -4,6 +4,28 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Account gate + trait-rich adjectives — SHIPPED
+Building a Joey now requires an account (when Supabase auth is configured — the
+creator's step 1 gates "Start" on login; local builds without Supabase bypass
+it). Name rerolls are capped at 3.
+
+Adjectives became a full **trait** system (`TRAITS` in economy.js). Each adjective
+grants one or more traits at an integer level (build 1/2/3 = stronger), and
+adjectives carry a **rarity** (common/uncommon/rare/legendary) that weights how
+often they roll and how strong they are. 20 trait dimensions, wired to real
+mechanics:
+- build speed, research speed, praying speed, income, offline earning
+- melee range, interact range, build aura (build reach), move speed, size (rare, ±)
+- starting money, shop discount, refunds, bag size (extra columns), weapon durability
+- esoteric affinity (lower soul thresholds), research weight (contribution ×),
+  forgiveness (extra guilt-free kills), kill bounty, scavenging (loot duplication)
+
+~40 adjectives span these (e.g. JOEY HERCULEAN = build 3; JOEY MONASTIC = pray 2
++ eso 2; JOEY OVERLORD legendary = income 3 + build 2 + speed 1; JOEY GIGANTIC =
+size 2 + melee 1). Active traits show as chips in the Locker; the creator shows
+each name's rarity + full trait list. Old `me.buffs` (incomeMult/speedMult) is
+replaced by `me.traits`; the ME_KEY reset already clears stale saves.
+
 ## 2026-09-16 — Combat + Garlic Charlie — SHIPPED
 Attacks are instant kills at melee range, so fleeing works. **Q** swings your
 equipped **weapon** (you can only attack with one in the hand slot); the tier-1

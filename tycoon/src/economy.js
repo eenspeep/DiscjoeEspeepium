@@ -36,35 +36,127 @@ export const SPECIALTIES = {
   brain: { id: "brain", name: "JOE BRAIN", glyph: "🧠", tint: "#4b56b8", start: { brain: 3, build: 1 }, blurb: "Big ideas. BRAIN gear and furniture work harder, and you research faster." },
   build: { id: "build", name: "JOE BUILD", glyph: "🔧", tint: "#c9772f", start: { brain: 1, build: 3 }, blurb: "Big hands. BUILD gear and furniture work harder, and you build faster." },
 };
+// ---- traits (adjective modifiers) -----------------------------------------
+// Every adjective grants one or more of these at an integer "amount" that is
+// the level (build 1/2/3 = stronger). Wired into the engine through traitVal()
+// and the range/discount/etc. getters below.
+export const TRAITS = {
+  build:      { label: "Build speed",       glyph: "🔧", per: (a) => `+${a} build power` },
+  research:   { label: "Research speed",    glyph: "🔬", per: (a) => `+${a * 15}% research` },
+  pray:       { label: "Praying speed",     glyph: "🔮", per: (a) => `+${a * 20}% soul` },
+  melee:      { label: "Melee range",       glyph: "🔪", per: (a) => `+${a} melee reach` },
+  interact:   { label: "Interact range",    glyph: "🖐️", per: (a) => `+${a} use range` },
+  speed:      { label: "Move speed",        glyph: "👟", per: (a) => `+${a * 12}% move speed` },
+  size:       { label: "Size",              glyph: "📏", per: (a) => `${a > 0 ? "+" : ""}${a * 8}% size` },
+  startMoney: { label: "Starting money",    glyph: "💰", per: (a) => `+${a * 100}¢ to start` },
+  buildReach: { label: "Build aura",        glyph: "📡", per: (a) => `+${a} build aura` },
+  income:     { label: "Income",            glyph: "¢",  per: (a) => `+${a * 8}% income` },
+  offline:    { label: "Offline earning",   glyph: "🌙", per: (a) => `+${a * 10}% offline` },
+  discount:   { label: "Shop discount",     glyph: "🏷️", per: (a) => `${a * 6}% off shop` },
+  refund:     { label: "Refunds",           glyph: "♻️", per: (a) => `+${a * 8}% refunds` },
+  bag:        { label: "Bag size",          glyph: "🎒", per: (a) => `+${a} bag column${a > 1 ? "s" : ""}` },
+  weapon:     { label: "Weapon durability", glyph: "⚔️", per: (a) => `+${a} weapon use${a > 1 ? "s" : ""}` },
+  eso:        { label: "Esoteric affinity", glyph: "🕯️", per: (a) => `−${a * 12}% soul to ascend` },
+  researchWeight: { label: "Research weight", glyph: "📚", per: (a) => `+${a * 20}% research credit` },
+  forgiveness:{ label: "Forgiveness",       glyph: "😇", per: (a) => `+${a} guilt-free kill${a > 1 ? "s" : ""}` },
+  bounty:     { label: "Bounty",            glyph: "☠️", per: (a) => `+${a * 20}% kill bounty` },
+  scavenger:  { label: "Scavenging",        glyph: "🧲", per: (a) => `${a * 15}% loot duplication` },
+};
+export function traitVal(me, key) { return (me && me.traits && me.traits[key]) || 0; }
+export function interactRange(me) { return TUNING.adjacencyRange + traitVal(me, "interact"); }
+export function buildRange(me) { return TUNING.adjacencyRange + traitVal(me, "buildReach"); }
+export function attackRangeFor(me) { return TUNING.attackRange + 0.5 * traitVal(me, "melee"); }
+export function weaponBonus(me) { return traitVal(me, "weapon"); }
+export function discountFrac(me) { return Math.min(0.5, 0.06 * traitVal(me, "discount")); }
+export function refundFrac(me, base = 0.4) { return Math.min(0.9, base + 0.08 * traitVal(me, "refund")); }
+export function sizeMult(me) { return 1 + 0.08 * traitVal(me, "size"); }
+export function killFreebies(me) { return 1 + traitVal(me, "forgiveness"); }
+
+// ---- adjectives (name + trait bundle, by rarity) --------------------------
+export const RARITY = {
+  common:    { label: "Common",    weight: 100, tint: "#8a94a6" },
+  uncommon:  { label: "Uncommon",  weight: 42,  tint: "#3f9e57" },
+  rare:      { label: "Rare",      weight: 13,  tint: "#3f6fb8" },
+  legendary: { label: "Legendary", weight: 3,   tint: "#b8862f" },
+};
 export const ADJECTIVES = [
-  { word: "SWOLE", buff: { stat: "build", amount: 3 } }, { word: "BRAINY", buff: { stat: "brain", amount: 3 } },
-  { word: "BEEFY", buff: { stat: "build", amount: 2 } }, { word: "CLEVER", buff: { stat: "brain", amount: 2 } },
-  { word: "HANDY", buff: { stat: "build", amount: 2 } }, { word: "WISE", buff: { stat: "brain", amount: 2 } },
-  { word: "GRIZZLED", buff: { brain: 1, build: 1 } }, { word: "BALANCED", buff: { brain: 1, build: 1 } },
-  { word: "LUCKY", buff: { incomeMult: 0.10 } }, { word: "CAFFEINATED", buff: { incomeMult: 0.08 } },
-  { word: "ZESTY", buff: { incomeMult: 0.06 } }, { word: "NIMBLE", buff: { speedMult: 0.30 } },
-  { word: "SPRIGHTLY", buff: { speedMult: 0.22 } }, { word: "STOIC", buff: { brain: 2, build: 1 } },
-  { word: "RUGGED", buff: { brain: 1, build: 2 } },
+  // common — one small perk
+  { word: "SWOLE", rarity: "common", stats: { build: 2 } },
+  { word: "BRAINY", rarity: "common", stats: { brain: 2 } },
+  { word: "GRIZZLED", rarity: "common", stats: { brain: 1, build: 1 } },
+  { word: "HANDY", rarity: "common", traits: { build: 1 } },
+  { word: "STUDIOUS", rarity: "common", traits: { research: 1 } },
+  { word: "SPRIGHTLY", rarity: "common", traits: { speed: 1 } },
+  { word: "THRIFTY", rarity: "common", traits: { discount: 1 } },
+  { word: "FRUGAL", rarity: "common", traits: { refund: 1 } },
+  { word: "WELL-FED", rarity: "common", traits: { startMoney: 1 } },
+  { word: "LONG-ARMED", rarity: "common", traits: { interact: 1 } },
+  { word: "STABBY", rarity: "common", traits: { melee: 1 } },
+  { word: "PIOUS", rarity: "common", traits: { pray: 1 } },
+  { word: "PACKRAT", rarity: "common", traits: { bag: 1 } },
+  { word: "NOCTURNAL", rarity: "common", traits: { offline: 1 } },
+  { word: "LUCKY", rarity: "common", traits: { income: 1 } },
+  // uncommon — a bigger perk or two small
+  { word: "BUFF", rarity: "uncommon", traits: { build: 2 } },
+  { word: "CLEVER", rarity: "uncommon", traits: { research: 2 } },
+  { word: "FLEET", rarity: "uncommon", traits: { speed: 2 } },
+  { word: "MONKISH", rarity: "uncommon", traits: { pray: 2 } },
+  { word: "LOADED", rarity: "uncommon", traits: { startMoney: 2 } },
+  { word: "HAGGLER", rarity: "uncommon", traits: { discount: 2 } },
+  { word: "SCHOLARLY", rarity: "uncommon", traits: { research: 1, researchWeight: 1 } },
+  { word: "HOARDER", rarity: "uncommon", traits: { bag: 2 } },
+  { word: "INSOMNIAC", rarity: "uncommon", traits: { offline: 2 } },
+  { word: "CAFFEINATED", rarity: "uncommon", traits: { income: 2 } },
+  { word: "DUELIST", rarity: "uncommon", traits: { melee: 2, weapon: 1 } },
+  { word: "FORESIGHTED", rarity: "uncommon", traits: { buildReach: 2 } },
+  { word: "SAINTLY", rarity: "uncommon", traits: { pray: 1, forgiveness: 1 } },
+  { word: "GRABBY", rarity: "uncommon", traits: { interact: 1, scavenger: 1 } },
+  // rare — level-3 or strong combos
+  { word: "HERCULEAN", rarity: "rare", traits: { build: 3 } },
+  { word: "GENIUS", rarity: "rare", traits: { research: 3 } },
+  { word: "MERCURIAL", rarity: "rare", traits: { speed: 3 } },
+  { word: "MONASTIC", rarity: "rare", traits: { pray: 2, eso: 2 } },
+  { word: "TYCOON", rarity: "rare", traits: { income: 2, startMoney: 2 } },
+  { word: "WARLORD", rarity: "rare", traits: { melee: 2, weapon: 2, bounty: 2 } },
+  { word: "ARCHITECT", rarity: "rare", traits: { build: 2, buildReach: 2 } },
+  { word: "BOTTOMLESS", rarity: "rare", traits: { bag: 3 } },
+  { word: "SCAVENGER", rarity: "rare", traits: { scavenger: 2, bounty: 1 } },
+  { word: "REPENTANT", rarity: "rare", traits: { forgiveness: 2, pray: 1 } },
+  // legendary — multi-trait monsters + the size rolls
+  { word: "GIGANTIC", rarity: "legendary", traits: { size: 2, melee: 1 } },
+  { word: "TINY", rarity: "legendary", traits: { size: -2, speed: 2, interact: 1 } },
+  { word: "ASCENDANT", rarity: "legendary", traits: { pray: 3, eso: 3 } },
+  { word: "OVERLORD", rarity: "legendary", traits: { income: 3, build: 2, speed: 1 } },
+  { word: "ANOINTED", rarity: "legendary", traits: { forgiveness: 3, pray: 2, eso: 1 } },
+  { word: "POLYMATH", rarity: "legendary", traits: { research: 2, build: 2, income: 1 } },
 ];
+export function adjByWord(word) { return ADJECTIVES.find((a) => a.word === word); }
+export function adjSummary(adj) {
+  const parts = [];
+  if (adj.stats) { if (adj.stats.brain) parts.push("🧠 +" + adj.stats.brain + " BRAIN"); if (adj.stats.build) parts.push("🔧 +" + adj.stats.build + " BUILD"); }
+  for (const [k, v] of Object.entries(adj.traits || {})) { const T = TRAITS[k]; if (T) parts.push(T.glyph + " " + T.per(v)); }
+  return parts.join(" · ");
+}
+// weighted random distinct adjectives (rarer ones show up less often)
+export function rollAdjectives(n, excludeWords = []) {
+  const ex = new Set(excludeWords), bag = ADJECTIVES.filter((a) => !ex.has(a.word)), out = [];
+  while (out.length < n && bag.length) {
+    let total = 0; for (const a of bag) total += RARITY[a.rarity].weight;
+    let r = Math.random() * total, idx = bag.length - 1;
+    for (let i = 0; i < bag.length; i++) { r -= RARITY[bag[i].rarity].weight; if (r <= 0) { idx = i; break; } }
+    out.push(bag.splice(idx, 1)[0]);
+  }
+  return out;
+}
 export function buildStats(specialtyId, adj) {
   const spec = SPECIALTIES[specialtyId] || SPECIALTIES.brain;
   const stats = { brain: spec.start.brain, build: spec.start.build };
-  const buffs = { incomeMult: 0, speedMult: 1 };
-  const b = adj?.buff || {};
-  if (b.stat) stats[b.stat] += b.amount;
-  if (b.brain) stats.brain += b.brain;
-  if (b.build) stats.build += b.build;
-  if (b.incomeMult) buffs.incomeMult += b.incomeMult;
-  if (b.speedMult) buffs.speedMult += b.speedMult;
-  return { stats, buffs };
-}
-export function adjSummary(adj) {
-  const b = adj.buff;
-  if (b.stat) return `+${b.amount} ${STATS[b.stat].label}`;
-  if (b.brain && b.build) return `+${b.brain} BRAIN, +${b.build} BUILD`;
-  if (b.incomeMult) return `+${Math.round(b.incomeMult * 100)}% income`;
-  if (b.speedMult) return `+${Math.round(b.speedMult * 100)}% speed`;
-  return "";
+  const traits = {};
+  if (adj) {
+    if (adj.stats) { stats.brain += adj.stats.brain || 0; stats.build += adj.stats.build || 0; }
+    for (const [k, v] of Object.entries(adj.traits || {})) traits[k] = (traits[k] || 0) + v;
+  }
+  return { stats, traits };
 }
 
 // ---- furniture (tiered) ---------------------------------------------------
@@ -177,10 +269,11 @@ export function modBonusOf(f) {
 export function nearbyModBonus(me, shared) {
   const out = { income: 0, research: 0, build: 0 };
   if (!shared || !shared.furniture || !me.pos) return out;
+  const range = interactRange(me);
   for (const [key, f] of Object.entries(shared.furniture)) {
     if (!f.mods) continue;
     const [gx, gy] = key.split(",").map(Number);
-    if (isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange, f.rot || 0)) {
+    if (isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) {
       const b = modBonusOf(f); out.income += b.income; out.research += b.research; out.build += b.build;
     }
   }
@@ -300,12 +393,14 @@ export function cellsExtent(cells) { return { w: Math.max(...cells.map((c) => c[
 export function bagGrid(me) {
   const inst = me.equipment && me.items[me.equipment.bag];
   const def = inst && ITEMS[inst.type];
-  return (def && def.grid) ? def.grid : { w: 2, h: 2 };
+  const g = (def && def.grid) ? def.grid : { w: 2, h: 2 };
+  const bonus = traitVal(me, "bag");   // "Bag size" trait adds columns
+  return bonus ? { w: g.w + bonus, h: g.h } : { w: g.w, h: g.h };
 }
 // Black marks (from kills) eat bag cells from the back. They can exceed the
 // current bag size (overflow isn't shown but still counts), so a bigger bag just
 // reveals more of your sins — you can't "bag" your way out of them.
-export function blackMarkSlots(me) { return Math.max(0, (me && me.kills || 0) - 1); }
+export function blackMarkSlots(me) { return Math.max(0, (me && me.kills || 0) - killFreebies(me)); }
 export function blackMarkCells(me) {
   const g = bagGrid(me), total = g.w * g.h, n = Math.min(total, blackMarkSlots(me)), set = new Set();
   for (let i = 0; i < n; i++) { const idx = total - 1 - i; set.add((idx % g.w) + "," + Math.floor(idx / g.w)); }
@@ -391,15 +486,16 @@ export function wornArt(me) {
 export function income(me, shared, { passiveOnly = false } = {}) {
   const sc = statScales(me);
   let flat = TUNING.baseIncome + TUNING.statFlat * ((me.stats?.brain || 0) + (me.stats?.build || 0));
-  let multPct = (me.buffs && me.buffs.incomeMult) || 0;
+  let multPct = 0.08 * traitVal(me, "income");   // "Income" trait
   for (const def of equippedDefs(me)) {
     if (def.value) flat += scaleByTag(itemValue(def), def.tag, sc);
     if (def.mult) multPct += def.mult;
   }
   if (!passiveOnly && shared && shared.furniture && me.pos) {
+    const range = interactRange(me);
     for (const [key, f] of Object.entries(shared.furniture)) {
       const [gx, gy] = key.split(",").map(Number);
-      if (isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange, f.rot || 0)) {
+      if (isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) {
         flat += scaleByTag(furnitureValue(f), FURNITURE[f.type].tag, sc);
         flat += modBonusOf(f).income; // node mods (plants) = flat income
       }
@@ -409,14 +505,14 @@ export function income(me, shared, { passiveOnly = false } = {}) {
   return Math.round(flat * (1 + multPct) * 100) / 100;
 }
 export function effectiveSpeedMult(me) {
-  let m = (me.buffs && me.buffs.speedMult) || 1;
+  let m = 1 + 0.12 * traitVal(me, "speed");   // "Move speed" trait
   for (const def of equippedDefs(me)) if (def.speedMult) m += def.speedMult;
   return m;
 }
-export function usingKeys(pos, shared) {
+export function usingKeys(pos, shared, range = TUNING.adjacencyRange) {
   const keys = [];
   if (!shared || !shared.furniture || !pos) return keys;
-  for (const [key, f] of Object.entries(shared.furniture)) { const [gx, gy] = key.split(",").map(Number); if (isNearFootprint(pos, f.type, gx, gy, TUNING.adjacencyRange, f.rot || 0)) keys.push(key); }
+  for (const [key, f] of Object.entries(shared.furniture)) { const [gx, gy] = key.split(",").map(Number); if (isNearFootprint(pos, f.type, gx, gy, range, f.rot || 0)) keys.push(key); }
   return keys;
 }
 export function isUsing(pos, gx, gy) {
@@ -488,23 +584,25 @@ export function doorPassable(door, key, meId, unlocked) {
 
 export function buildPower(me, shared) {
   let p = TUNING.baseBuild + TUNING.buildScale * ((me.stats && me.stats.build) || 0);
+  p += 0.5 * traitVal(me, "build");   // "Build speed" trait
   for (const def of equippedDefs(me)) if (def.buildBonus) p += def.buildBonus;
   if (shared) p += nearbyModBonus(me, shared).build; // node mods (tools) = flat build
   return p;
 }
 export function rpRate(me, shared) {
   if (!shared || !shared.furniture || !me.pos) return 0;
-  const brain = (me.stats && me.stats.brain) || 0;
+  const brain = (me.stats && me.stats.brain) || 0, range = interactRange(me);
   let rp = 0;
   for (const [key, f] of Object.entries(shared.furniture)) {
     const [gx, gy] = key.split(",").map(Number);
     const def = FURNITURE[f.type];
-    if (!isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange, f.rot || 0)) continue;
+    if (!isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) continue;
     // research scales with the furniture's TIER (not its factorial income).
     if (def.tag === "brain") rp += (def.tier + 0.5 * (f.level - 1)) * TUNING.researchScale * (1 + brain * TUNING.researchStatBonus);
     rp += modBonusOf(f).research; // node mods (lamps) = flat research
   }
   for (const def of equippedDefs(me)) if (def.researchBonus) rp += def.researchBonus;
+  rp *= 1 + 0.15 * traitVal(me, "research");   // "Research speed" trait
   return Math.round(rp * 100) / 100;
 }
 export function siteProgress(site) { return Object.values(site.progBy || {}).reduce((a, b) => a + b, 0); }
@@ -536,16 +634,21 @@ const ESO_FURN = { quantumboard: 1, obelisk: 1, fabricator: 1, aicluster: 2, ora
 export function esoOfItem(type) { return ESO_ITEM[type] || 0; }
 export function esoOfFurniture(type) { return ESO_FURN[type] || 0; }
 
+// "Esoteric affinity" trait lowers every soul threshold, so you ascend on less.
+export function esoThresholds(me) {
+  const f = 1 - 0.12 * traitVal(me, "eso");
+  return ESO_THRESHOLDS.map((t) => Math.floor(t * f));
+}
 export function currentEso(me) {
-  const s = (me && me.soul) || 0; let e = 0;
-  for (let i = 0; i < ESO_THRESHOLDS.length; i++) if (s >= ESO_THRESHOLDS[i]) e = i;
+  const s = (me && me.soul) || 0, th = esoThresholds(me); let e = 0;
+  for (let i = 0; i < th.length; i++) if (s >= th[i]) e = i;
   return e;
 }
 export function esoUnlocked(level, me) { return level <= currentEso(me); }
 export function nextEso(me) {
   const e = currentEso(me);
   if (e >= ESO_MAX) return null;
-  return { level: e + 1, name: ESO_NAME[e + 1], need: ESO_THRESHOLDS[e + 1], have: Math.floor((me && me.soul) || 0) };
+  return { level: e + 1, name: ESO_NAME[e + 1], need: esoThresholds(me)[e + 1], have: Math.floor((me && me.soul) || 0) };
 }
 export function esoNeed(level) { return ESO_THRESHOLDS[level] || 0; }
 
@@ -553,14 +656,14 @@ export function esoNeed(level) { return ESO_THRESHOLDS[level] || 0; }
 // the (future, kill-driven) soulMult.
 export function soulRate(me, shared) {
   if (!shared || !shared.furniture || !me.pos) return 0;
-  let base = 0;
+  let base = 0; const range = interactRange(me);
   for (const [key, f] of Object.entries(shared.furniture)) {
     const [gx, gy] = key.split(",").map(Number);
     const def = FURNITURE[f.type];
-    if (def.soul && isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange, f.rot || 0)) base += def.soul * (1 + 0.5 * (f.level - 1));
+    if (def.soul && isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) base += def.soul * (1 + 0.5 * (f.level - 1));
   }
   if (base <= 0) return 0;
-  let mult = 1;
+  let mult = 1 + 0.2 * traitVal(me, "pray");   // "Praying speed" trait
   for (const d of equippedDefs(me)) if (d.soulBonus) mult += d.soulBonus;
   return Math.round(base * TUNING.soulScale * mult * ((me && me.soulMult) || 1) * 100) / 100;
 }
