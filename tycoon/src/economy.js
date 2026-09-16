@@ -545,6 +545,14 @@ export function inHall(shared, gx, gy) {
   for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
   return false;
 }
+// A tile is "protected" (communal) if it sits in a room flagged protected, or in
+// any office hallway. Furniture in a protected tile can be sold by anyone, and
+// the refund goes back to whoever paid for it.
+export function isProtected(shared, gx, gy) {
+  for (const r of (shared.rooms || [])) if (r.protected && gx >= r.x && gx < r.x + r.w && gy >= r.y && gy < r.y + r.h) return true;
+  for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
+  return false;
+}
 
 // The next side room + connecting hallway to add. Rooms grow along 4 arms
 // (E, S, W, N) so every hallway is a straight 1-wide corridor.

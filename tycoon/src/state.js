@@ -7,7 +7,7 @@ import { now, uid, clamp, hash } from "./util.js";
 import { defaultLook } from "./appearance.js";
 import {
   income, FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost,
-  roomCost, canAddRoom, nextRoom, floorBounds, isWalkable, inHall, walkableSet,
+  roomCost, canAddRoom, nextRoom, floorBounds, isWalkable, inHall, walkableSet, isProtected,
   buildStats, SPECIALTIES, ADJECTIVES,
   ITEMS, ITEM_SLOTS, firstFit, fitsAt, itemCells, bagGrid,
   weekStartFor, everyoneVoted, tallyVotes, proposalById, PROPOSALS,
@@ -157,15 +157,18 @@ function defaultShared() {
   furniture[`${cx},${cy}`] = { type: "chair", level: 1, by: [] };
   furniture[`${cx + 1},${cy}`] = { type: "workbench", level: 1, by: [] };
   furniture[`${cx},${cy + 1}`] = { type: "snacktable", level: 1, by: [] };
-  return { rooms: [{ x: 0, y: 0, w, h }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, sites: {}, loot: {}, charlie: { alive: true, diedAt: null, lastBuy: now() }, research: { contrib: {} }, pot: defaultPot() };
+  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, sites: {}, loot: {}, owed: {}, charlie: { alive: true, diedAt: null, lastBuy: now() }, research: { contrib: {} }, pot: defaultPot() };
 }
 function healShared(s) {
   if (!s.rooms) { const w = (s.floor && s.floor.w) || 9, h = (s.floor && s.floor.h) || 9; s.rooms = [{ x: 0, y: 0, w, h }]; }
+  // every office room is protected (communal furniture); backfill old saves
+  for (const r of s.rooms) if (r.protected === undefined) r.protected = true;
   if (!s.halls) s.halls = [];
   if (!s.doors) s.doors = {};
   if (!s.furniture) s.furniture = {};
   if (!s.sites) s.sites = {};
   if (!s.loot) s.loot = {};
+  if (!s.owed) s.owed = {};
   if (!s.charlie) s.charlie = { alive: true, diedAt: null, lastBuy: now() };
   if (!s.research) s.research = { contrib: {} };
   if (!s.research.contrib) s.research.contrib = {};
@@ -230,6 +233,7 @@ export function tickEconomy() {
       buildTick(dt);
     }
     me.lastSeen = t;
+    claimOwed();
   }
   potTick(t);
   charlieTick(t);
@@ -248,7 +252,7 @@ function buildTick(dt) {
     site.progBy[me.id] = round2((site.progBy[me.id] || 0) + power * dt);
     state.dirty = true;
     if (siteProgress(site) >= site.work) {
-      if (!s.furniture[key]) s.furniture[key] = { type: site.type, level: 1, by: Object.keys(site.progBy), rot: site.rot || 0 };
+      if (!s.furniture[key]) s.furniture[key] = { type: site.type, level: 1, by: Object.keys(site.progBy), rot: site.rot || 0, paidBy: site.paidBy || null };
       delete s.sites[key];
       state.justBuilt = FURNITURE[site.type] ? FURNITURE[site.type].name : site.type;
       flushShared(true);
@@ -311,6 +315,32 @@ export function income$() { return income(state.me, state.shared); }
 function spend(amt) { state.me.credits = round2(state.me.credits - amt); state.meDirty = true; }
 function commit() { state.dirty = true; flushShared(true); saveMe(); notify(); }
 
+// Refunds owed to another player are parked in a shared ledger and claimed by
+// that player's own client (survives them being offline when you sell).
+function creditOwed(playerId, amount) {
+  const s = state.shared; s.owed = s.owed || {};
+  s.owed[playerId] = round2((s.owed[playerId] || 0) + amount);
+  state.dirty = true;
+}
+function claimOwed() {
+  const s = state.shared, me = state.me;
+  if (!s || !s.owed || !me || !me.created) return;
+  const amt = s.owed[me.id];
+  if (amt && amt > 0) {
+    me.credits = round2(me.credits + amt);
+    delete s.owed[me.id];
+    state.meDirty = true; state.justRefund = amt;
+    flushShared(true); notify();
+  }
+}
+// Route a furniture/site refund to whoever paid: my wallet if it's mine, the
+// shared ledger if it's a real other player, my wallet if the payer is unknown
+// or the bot (so gold isn't lost to the void).
+function payRefund(payerId, amount) {
+  if (payerId && payerId !== state.me.id && payerId !== CHARLIE_ID) { creditOwed(payerId, amount); return true; }
+  state.me.credits = round2(state.me.credits + amount); state.meDirty = true; return false;
+}
+
 export function tryPlaceFurniture(type, gx, gy, rot = 0) {
   const s = state.shared, key = `${gx},${gy}`;
   if (furnitureTier(type) > currentTier(s)) return { ok: false, why: "That tier isn't researched yet — use BRAIN furniture." };
@@ -324,7 +354,7 @@ export function tryPlaceFurniture(type, gx, gy, rot = 0) {
   const cost = Math.ceil(furnitureBuyCost(s, type) * (1 - discountFrac(state.me)));   // "Shop discount" trait
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
   spend(cost);
-  s.sites[key] = { type, rot, work: furnitureWork(type), progBy: {}, started: now() };
+  s.sites[key] = { type, rot, work: furnitureWork(type), progBy: {}, started: now(), paidBy: state.me.id, paid: cost };
   commit();
   return { ok: true, building: true };
 }
@@ -355,9 +385,14 @@ export function tryRemoveMod(gx, gy) {
 
 export function cancelSite(key) {
   const s = state.shared, site = s.sites[key]; if (!site) return { ok: false };
-  const refund = Math.ceil(furnitureBuyCost(s, site.type) * refundFrac(state.me));
-  delete s.sites[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
-  return { ok: true, refund };
+  const [gx, gy] = key.split(",").map(Number), prot = isProtected(s, gx, gy);
+  if (!prot && site.paidBy && site.paidBy !== state.me.id) return { ok: false, why: "Only the buyer can cancel this build." };
+  const payer = site.paidBy, mine = !payer || payer === state.me.id;
+  const refund = Math.ceil(furnitureBuyCost(s, site.type) * (mine ? refundFrac(state.me) : 0.4));
+  delete s.sites[key];
+  const toOther = payRefund(payer, refund);
+  commit();
+  return { ok: true, refund, toOther };
 }
 export function tryUpgradeFurniture(key) {
   const f = state.shared.furniture[key]; if (!f) return { ok: false };
@@ -367,10 +402,15 @@ export function tryUpgradeFurniture(key) {
 }
 export function trySellFurniture(key) {
   const s = state.shared, f = s.furniture[key]; if (!f) return { ok: false };
-  if (Array.isArray(f.by) && f.by.length && !f.by.includes(state.me.id)) return { ok: false, why: "Only its builders can sell it." };
-  const refund = Math.ceil(furnitureBuyCost(s, f.type) * refundFrac(state.me));
-  delete s.furniture[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
-  return { ok: true, refund };
+  const [gx, gy] = key.split(",").map(Number), prot = isProtected(s, gx, gy);
+  // outside a protected room, only the builders may sell (private-room rule)
+  if (!prot && Array.isArray(f.by) && f.by.length && !f.by.includes(state.me.id)) return { ok: false, why: "Only its builders can sell it." };
+  const payer = f.paidBy, mine = !payer || payer === state.me.id;
+  const refund = Math.ceil(furnitureBuyCost(s, f.type) * (mine ? refundFrac(state.me) : 0.4));
+  delete s.furniture[key];
+  const toOther = payRefund(payer, refund);
+  commit();
+  return { ok: true, refund, toOther };
 }
 export function tryAddRoom() {
   const s = state.shared;
@@ -378,6 +418,7 @@ export function tryAddRoom() {
   const cost = roomCost(s);
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
   const { room, hall } = nextRoom(s);
+  room.protected = true;   // rooms added onto the office are protected too
   spend(cost);
   s.rooms.push(room); s.halls.push(hall); s.floor = floorBounds(s);
   commit();

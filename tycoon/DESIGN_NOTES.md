@@ -4,6 +4,21 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Protected rooms + refund-to-buyer — SHIPPED
+Every office room (main + each added room) carries a `protected: true` flag, and
+hallways count as protected too. In a protected tile, ANYONE can sell a piece of
+furniture (not just its builders), and the refund goes back to whoever **paid**
+for it, not the seller. Non-protected tiles (future private rooms behind locked
+doors) keep the old builder-only sell rule with the refund going to the seller.
+
+Mechanics: furniture now records `paidBy` (the player who spent the credits to
+start its build site). On a cross-owner sale the refund is parked in a shared
+`owed` ledger keyed by player id, and that player's own client claims it on its
+next tick (so it survives them being offline). Refund for someone else uses the
+base 40% rate, a self-sale still uses the seller's refund trait. Refunds owed to
+Garlic Charlie or to unknown payers fall back to the seller so no gold is lost.
+`cancelSite` follows the same routing. Verified headless (19 assertions).
+
 ## 2026-09-16 — Account gate + trait-rich adjectives — SHIPPED
 Building a Joey now requires an account (when Supabase auth is configured — the
 creator's step 1 gates "Start" on login; local builds without Supabase bypass

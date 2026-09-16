@@ -12,7 +12,7 @@ import {
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
-  roomCost, canAddRoom, statScales, SPECIALTIES, ADJECTIVES, adjSummary, rollAdjectives, RARITY, STATS,
+  roomCost, canAddRoom, isProtected, statScales, SPECIALTIES, ADJECTIVES, adjSummary, rollAdjectives, RARITY, STATS,
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
   furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
@@ -51,6 +51,7 @@ export function initUI(authApi) {
     if (state.justBlocked) { flash("🛡️ Blocked " + state.justBlocked.by + " — your " + state.justBlocked.shield + " shattered!"); state.justBlocked = null; }
     if (state.justFirstKill) { flash("⚠️ First kill — a warning. Kill again and black marks eat your bag."); state.justFirstKill = null; }
     if (state.justBlackMark) { flash("🖤 A black mark stains your soul — a bag slot is lost."); state.justBlackMark = null; }
+    if (state.justRefund) { flash("💸 +" + fmt(state.justRefund) + " refunded to you (someone sold furniture you paid for)."); state.justRefund = null; }
     if (state.justKilled) { flash("☠️ Killed by " + state.justKilled + ". Your gear dropped where you fell. Build a new Joey."); state.justKilled = null; closePanel(); ensureCreator(); }
   }, 400);
 }
@@ -164,13 +165,17 @@ function renderFurniture() {
   const def = FURNITURE[f.type], sc = statScales(state.me), raw = furnitureValue(f);
   const mine = def.tag === "brain" ? raw * sc.brain : def.tag === "build" ? raw * sc.build : raw;
   const up = upgradeCost(f);
+  const [gx, gy] = openKey.split(",").map(Number);
+  const prot = isProtected(state.shared, gx, gy);
+  const iPaid = !f.paidBy || f.paidBy === state.me.id;
   panel.replaceChildren(
     panelHeader(def.glyph + " " + def.name),
     el("p", { class: "muted small", text: def.tag.toUpperCase() + " furniture. Buffs anyone standing next to it." }),
+    prot ? el("p", { class: "muted small", text: iPaid ? "🛡️ Protected room — anyone can sell this, and the refund comes back to you (you paid for it)." : "🛡️ Protected room — anyone can sell this, and the refund goes back to whoever paid for it." }) : null,
     stat("Level", String(f.level)), stat("Base value", "+" + fmt(raw) + "/s"), stat("For you (stats)", "+" + fmt(Math.round(mine * 100) / 100) + "/s"),
     el("div", { class: "panel-actions" }, [
       el("button", { class: "btn primary" + (state.me.credits >= up ? "" : " poor"), onclick: () => { const r = tryUpgradeFurniture(openKey); flash(r.ok ? def.name + " upgraded." : (r.why || "Can't upgrade.")); } }, ["Upgrade — " + fmt(up)]),
-      el("button", { class: "btn", onclick: () => { const r = trySellFurniture(openKey); flash(r.ok ? "Sold for " + fmt(r.refund) + "." : "Can't sell."); closePanel(); } }, ["Sell"]),
+      el("button", { class: "btn", onclick: () => { const r = trySellFurniture(openKey); flash(!r.ok ? (r.why || "Can't sell.") : r.toOther ? "Sold — " + fmt(r.refund) + " returned to its buyer." : "Sold for " + fmt(r.refund) + "."); if (r.ok) closePanel(); } }, ["Sell"]),
     ])
   );
 }
@@ -187,7 +192,7 @@ function renderSite() {
     panelHeader("🔨 Building: " + def.name),
     el("p", { class: "muted small", text: "Stand next to it to build. More builders finish it faster, and everyone who helps co-owns it." }),
     stat("Progress", pct + "%"), stat("Builders so far", String(builders)), stat("Work", Math.floor(siteProgress(site)) + " / " + site.work),
-    el("div", { class: "panel-actions" }, [el("button", { class: "btn", onclick: () => { const r = cancelSite(openKey); flash(r.ok ? "Build cancelled, refunded " + fmt(r.refund) + "." : "Can't cancel."); closePanel(); } }, ["Cancel build"])])
+    el("div", { class: "panel-actions" }, [el("button", { class: "btn", onclick: () => { const r = cancelSite(openKey); flash(!r.ok ? (r.why || "Can't cancel.") : r.toOther ? "Build cancelled — " + fmt(r.refund) + " returned to its buyer." : "Build cancelled, refunded " + fmt(r.refund) + "."); if (r.ok) closePanel(); } }, ["Cancel build"])])
   );
 }
 
