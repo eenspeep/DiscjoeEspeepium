@@ -5,7 +5,7 @@ import { ECON_TICK_MS, TUNING } from "./config.js";
 import { uid } from "./util.js";
 import { connectNet } from "./net/net.js";
 import { state, initState, tickEconomy, flushShared, saveMe, setAccount, adoptProfile, setProfileSaver, receiveAttack, applyKillReward } from "./state.js";
-import { hasSupabase, currentUser, signIn, signUp, signOut, loadProfile, saveProfile } from "./account.js";
+import { hasSupabase, currentUser, signIn, signUp, signOut, loadProfile, saveProfile, onProfileError } from "./account.js";
 import { initWorld, myPresence, applyPush } from "./world.js";
 import { initUI, openFurniture, openSite, openDoor, flash, showOffline } from "./ui.js";
 
@@ -14,7 +14,8 @@ async function applyAuthed(acc) {
   setProfileSaver((me) => saveProfile(acc.userId, me));
   let prof = null;
   try { prof = await loadProfile(acc.userId); } catch (e) { console.warn(e); }
-  if (prof) adoptProfile(prof); else saveMe(); // seed the cloud with the current local Joey
+  if (prof) { adoptProfile(prof); if (prof.created) flash("Loaded your saved Joey from the cloud."); }
+  else saveMe(); // seed the cloud with the current local Joey
 }
 async function doLogout() {
   try { await signOut(); } catch (e) { /* ignore */ }
@@ -23,6 +24,7 @@ async function doLogout() {
 
 async function boot() {
   const myId = uid();
+  onProfileError((kind, msg) => flash((kind === "save" ? "☁️ Cloud save failed: " : "☁️ Cloud load failed: ") + msg));
   const net = await connectNet(myId);
   await initState(net);
 
