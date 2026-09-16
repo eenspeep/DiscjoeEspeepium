@@ -331,7 +331,19 @@ body {
 .creator h2 { margin: 0 0 14px; font-size: 26px; letter-spacing: 0.04em; }
 .creator-body { display: flex; gap: 18px; }
 .creator-left { flex: 0 0 170px; display: flex; flex-direction: column; align-items: center; gap: 8px; }
-.joey-preview { background: radial-gradient(120% 120% at 50% 30%, #eef2f8, #d9e0ec); border-radius: 14px; }
+/* checkerboard shows the Joey's transparent background */
+.joey-preview {
+  background-color: #fbfbfd;
+  background-image:
+    linear-gradient(45deg, #dfe4ec 25%, transparent 25%), linear-gradient(-45deg, #dfe4ec 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #dfe4ec 75%), linear-gradient(-45deg, transparent 75%, #dfe4ec 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  border-radius: 14px;
+}
+.pick-rows { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+.pick-row { display: flex; align-items: center; gap: 8px; }
+.color-pick { width: 42px; height: 28px; border: 1px solid var(--line); border-radius: 8px; padding: 0; background: none; cursor: pointer; }
 .creator-right { flex: 1; min-width: 0; }
 .sect-label { font-family: "Fredoka", sans-serif; font-weight: 600; font-size: 14px; color: var(--muted); margin: 14px 0 8px; text-transform: uppercase; letter-spacing: 0.05em; }
 .sect-label:first-child { margin-top: 0; }

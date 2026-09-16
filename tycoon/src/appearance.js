@@ -4,40 +4,26 @@
 
 import { hash } from "./util.js";
 
-export const BASE_LOOK = {
-  skin: {
-    label: "Skin",
-    options: [
-      { id: "s0", name: "Warm", color: "#e8b48c" }, { id: "s1", name: "Fair", color: "#f2d0b3" },
-      { id: "s2", name: "Olive", color: "#c99866" }, { id: "s3", name: "Brown", color: "#9c6b43" },
-      { id: "s4", name: "Deep", color: "#6d4327" }, { id: "s5", name: "Rosy", color: "#f0c0a8" },
-    ],
-  },
-  stache: {
-    label: "'Stache",
-    options: [
-      { id: "m0", name: "Brown", color: "#4a3527" }, { id: "m1", name: "Black", color: "#211d1b" },
-      { id: "m2", name: "Blonde", color: "#c9a24a" }, { id: "m3", name: "Ginger", color: "#a4471f" },
-      { id: "m4", name: "Grey", color: "#9b968f" }, { id: "m5", name: "White", color: "#e9e6e0" },
-    ],
-  },
-  shirt: {
-    label: "Shirt",
-    options: [
-      { id: "c0", name: "Joe Teal", color: "#2f9c95" }, { id: "c1", name: "Charcoal", color: "#3a3f4b" },
-      { id: "c2", name: "Sunflower", color: "#f2b134" }, { id: "c3", name: "Coral", color: "#ec6a5c" },
-      { id: "c4", name: "Indigo", color: "#4b56b8" }, { id: "c5", name: "Forest", color: "#3c7a4a" },
-      { id: "c6", name: "Magenta", color: "#b8459b" },
-    ],
-  },
-};
+// Every Joey has paper-white skin. The only free-look choices are the mustache
+// and shirt colors, picked from an open color picker (any hex). Backgrounds are
+// transparent — the Joey is painted with no white box behind it.
+export const PAPER_WHITE = "#f6f3ea";
+export const LOOK_DEFAULTS = { stache: "#4a3527", shirt: "#2f9c95" };
+export const LOOK_PICKERS = [{ slot: "stache", label: "'Stache" }, { slot: "shirt", label: "Shirt" }];
+const HEX6 = /^#[0-9a-fA-F]{6}$/;
 
-export function defaultLook() { return { skin: "s0", stache: "m0", shirt: "c0" }; }
-export function lookOption(slot, id) { return BASE_LOOK[slot]?.options.find((o) => o.id === id) || BASE_LOOK[slot]?.options[0]; }
+export function lookColor(look, slot) {
+  if (slot === "skin") return PAPER_WHITE;                // skin is always paper-white
+  const v = look && look[slot];
+  return HEX6.test(v || "") ? v : LOOK_DEFAULTS[slot];
+}
+export function normalizeLook(look) { return { stache: lookColor(look, "stache"), shirt: lookColor(look, "shirt") }; }
+export function defaultLook() { return { ...LOOK_DEFAULTS }; }
 export function lookFromSeed(seed) {
   const h = hash(seed);
-  const pick = (slot, n) => BASE_LOOK[slot].options[(h >> n) % BASE_LOOK[slot].options.length].id;
-  return { skin: pick("skin", 2), stache: pick("stache", 5), shirt: pick("shirt", 8) };
+  const S = ["#4a3527", "#211d1b", "#c9a24a", "#a4471f", "#9b968f", "#e9e6e0"];
+  const C = ["#2f9c95", "#3a3f4b", "#f2b134", "#ec6a5c", "#4b56b8", "#3c7a4a", "#b8459b"];
+  return { stache: S[(h >> 5) % S.length], shirt: C[(h >> 8) % C.length] };
 }
 
 export function rrect(ctx, x, y, w, h, r) {
@@ -54,7 +40,7 @@ export function shade(hex, pct) {
 
 export function drawJoey(ctx, cx, cy, { look, worn = {}, scale = 1, walking = false, t = 0, name = "", using = false } = {}) {
   const lk = look || defaultLook();
-  const skin = lookOption("skin", lk.skin).color, stache = lookOption("stache", lk.stache).color, shirt = lookOption("shirt", lk.shirt).color;
+  const skin = PAPER_WHITE, stache = lookColor(lk, "stache"), shirt = lookColor(lk, "shirt");
   const S = scale;
   const bob = walking ? Math.abs(Math.sin(t * 9)) * 2.2 * S : Math.sin(t * 2) * 1.0 * S;
   ctx.save(); ctx.translate(cx, cy - bob);
@@ -93,8 +79,9 @@ export function drawJoey(ctx, cx, cy, { look, worn = {}, scale = 1, walking = fa
     ctx.beginPath(); ctx.moveTo(9.5 * S, -2 * S); ctx.lineTo(13 * S, -10 * S); ctx.stroke();
   }
 
-  // head
+  // head (paper-white, with a faint outline so it reads on light/transparent bg)
   ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(0, -21 * S, 8.4 * S, 0, 7); ctx.fill();
+  ctx.strokeStyle = "rgba(120,124,136,0.4)"; ctx.lineWidth = 1 * S; ctx.stroke();
   if (lk.stache !== "m5") { ctx.fillStyle = stache; ctx.beginPath(); ctx.arc(0, -23.5 * S, 8.6 * S, Math.PI * 1.03, Math.PI * 1.97); ctx.fill(); ctx.fillRect(-8.6 * S, -24 * S, 2.6 * S, 4 * S); ctx.fillRect(6 * S, -24 * S, 2.6 * S, 4 * S); }
 
   ctx.strokeStyle = stache; ctx.lineWidth = 1.8 * S; ctx.lineCap = "round";

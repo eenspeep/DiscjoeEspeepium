@@ -4,7 +4,7 @@
 
 import { TUNING, ME_KEY, CHARLIE_ID } from "./config.js";
 import { now, uid, clamp, hash } from "./util.js";
-import { defaultLook } from "./appearance.js";
+import { defaultLook, normalizeLook } from "./appearance.js";
 import {
   income, FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost,
   roomCost, canAddRoom, nextRoom, floorBounds, isWalkable, inHall, walkableSet, isProtected,
@@ -81,7 +81,7 @@ function blankMe() {
 
 function healMe(me) {
   if (!me || !me.id) me = blankMe();
-  me.look = { ...defaultLook(), ...(me.look || {}) };
+  me.look = normalizeLook(me.look);
   if (typeof me.credits !== "number") me.credits = TUNING.startCredits;
   me.pos = me.pos || { x: 0, y: 0 };
   me.buildQueue = Array.isArray(me.buildQueue) ? me.buildQueue : [];
@@ -120,7 +120,7 @@ export function createJoey({ specialty, adjectiveWord, look }) {
   me.adjectiveWord = adjectiveWord;
   me.name = "JOEY " + adjectiveWord;
   me.stats = stats; me.traits = traits;
-  me.look = { ...defaultLook(), ...(look || {}) };
+  me.look = normalizeLook(look);
   me.credits = TUNING.startCredits + 100 * (traits.startMoney || 0);   // "Starting money" trait
   me.created = true;
   me.lastTick = now(); me.lastSeen = now();

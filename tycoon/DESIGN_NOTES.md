@@ -4,6 +4,17 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Paper-white skin + color-picker look — SHIPPED
+Every Joey now has fixed paper-white skin (`PAPER_WHITE`), with a faint head
+outline so it reads on light or transparent backgrounds. Skin is no longer
+selectable. The only look choices are **mustache** and **shirt**, now driven by
+open `<input type="color">` pickers (any hex) instead of fixed swatches, in both
+the creator and the Locker. The `look` model changed from swatch ids to stored
+hex colors; `normalizeLook` coerces old/invalid saves to defaults. The creator
+preview sits on a checkerboard to show the transparent background (the Joey is
+painted with no white box behind it). `lookFromSeed` (Charlie/ambient) returns
+hex colors from a small palette.
+
 ## 2026-09-16 — Protected rooms + refund-to-buyer — SHIPPED
 Every office room (main + each added room) carries a `protected: true` flag, and
 hallways count as protected too. In a protected tile, ANYONE can sell a piece of

@@ -21,7 +21,7 @@ import {
   MODS, MOD_ORDER, modPrice, isModUnlocked,
   blackMarkCells, blackMarkSlots, TRAITS,
 } from "./economy.js";
-import { BASE_LOOK, drawJoey, defaultLook } from "./appearance.js";
+import { LOOK_PICKERS, lookColor, drawJoey, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setSelected, unlockDoorLocal } from "./world.js";
 
 let hud, buildbar, panel, toast;
@@ -336,11 +336,12 @@ function renderLocker() {
     }
   }
 
-  // base look
-  kids.push(el("div", { class: "ward-label", text: "Look" }));
-  for (const [slot, cfg] of Object.entries(BASE_LOOK)) {
-    kids.push(el("div", { class: "ward-slot" }, [el("div", { class: "ward-sub", text: cfg.label }), el("div", { class: "look-row" }, cfg.options.map((o) => el("button", { class: "swatch" + (me.look[slot] === o.id ? " on" : ""), style: `background:${o.color}`, title: o.name, onclick: () => setLook(slot, o.id) })))]));
-  }
+  // base look — paper-white skin, pick mustache + shirt colors
+  kids.push(el("div", { class: "ward-label", text: "Look · paper-white skin" }));
+  kids.push(el("div", { class: "pick-rows" }, LOOK_PICKERS.map(({ slot, label }) => el("label", { class: "pick-row" }, [
+    el("span", { class: "ward-sub", text: label }),
+    el("input", { type: "color", class: "color-pick", value: lookColor(me.look, slot), oninput: (e) => setLook(slot, e.target.value) }),
+  ]))));
 
   panel.replaceChildren(...kids);
 }
@@ -490,8 +491,10 @@ function openCreator() {
 
   const specRow = el("div", { class: "spec-row" }, Object.values(SPECIALTIES).map((sp) => el("button", { class: "spec-card", "data-id": sp.id, onclick: () => { sel.specialty = sp.id; markSpec(); } }, [el("div", { class: "spec-glyph", text: sp.glyph }), el("div", { class: "spec-name", text: sp.name }), el("div", { class: "spec-blurb muted small", text: sp.blurb }), el("div", { class: "spec-start small", text: "Start: 🧠 " + sp.start.brain + "  🔧 " + sp.start.build })])));
   const markSpec = () => { specRow.querySelectorAll(".spec-card").forEach((n) => n.classList.toggle("on", n.getAttribute("data-id") === sel.specialty)); updateStart(); };
-  const lookRows = el("div", {}, Object.entries(BASE_LOOK).map(([slot, cfg]) => el("div", { class: "ward-slot" }, [el("div", { class: "ward-sub", text: cfg.label }), el("div", { class: "look-row" }, cfg.options.map((o) => el("button", { class: "swatch" + (sel.look[slot] === o.id ? " on" : ""), style: `background:${o.color}`, title: o.name, "data-slot": slot, "data-id": o.id, onclick: () => { sel.look[slot] = o.id; markLook(slot); drawPreview(); } })))])));
-  const markLook = (slot) => lookRows.querySelectorAll(`.swatch[data-slot="${slot}"]`).forEach((n) => n.classList.toggle("on", n.getAttribute("data-id") === sel.look[slot]));
+  const lookRows = el("div", { class: "pick-rows" }, LOOK_PICKERS.map(({ slot, label }) => el("label", { class: "pick-row" }, [
+    el("span", { class: "ward-sub", text: label }),
+    el("input", { type: "color", class: "color-pick", value: lookColor(sel.look, slot), oninput: (e) => { sel.look[slot] = e.target.value; drawPreview(); } }),
+  ])));
 
   const adjWrap = el("div", { class: "adj-wrap" });
   const renderAdj = () => {
@@ -517,7 +520,7 @@ function openCreator() {
   const back = el("div", { class: "modal-back" }, [el("div", { class: "creator" }, [
     el("h2", { text: "BUILD YOUR JOEY" }),
     el("div", { class: "creator-body" }, [
-      el("div", { class: "creator-left" }, [preview, el("div", { class: "prev-cap muted small", text: "big nose, proud 'stache" })]),
+      el("div", { class: "creator-left" }, [preview, el("div", { class: "prev-cap muted small", text: "paper-white skin, proud 'stache" })]),
       el("div", { class: "creator-right" }, [
         el("div", { class: "sect-label", text: "1 · Account" }), acctRow,
         el("div", { class: "sect-label", text: "2 · Specialty" }), specRow,
