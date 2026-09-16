@@ -57,20 +57,18 @@ granularity to tiers and the presentation to grouped tiers.
     tier-3 item values together. Do this pass **against the new 10-tier system**
     (tier-3 here means the new shop tiers), so schedule it after / with item #1.
 
-### 3. Furniture footprints + collision
-- Furniture should occupy **more than one tile** depending on the piece
-  (per-type footprint, e.g. 1×1, 2×1, 2×2, L-shapes).
-- **No walking through furniture** — its footprint tiles are solid; movement and
-  pathing must collide with them.
-- Update every adjacency-based system (furniture "using"/income, BRAIN research
-  generation, BUILD construction sites) to work against the **footprint edges**,
-  not a single tile.
+### 3. Furniture footprints + collision — SHIPPED 2026-09-16
+Rectangular per-type footprints (1×1 up to 3×2); furniture + construction sites
+are solid, movement uses axis-separated wall-sliding, spawn avoids furniture,
+and income/research/soul/build adjacency all use footprint edges. (L-shaped
+furniture footprints skipped for now to keep rendering a single iso box.)
 
-### 4. Player collision + push-to-shove
-- Two players (or a player and a bot) **cannot occupy the same tile**.
-- You can **interact with an adjacent person to push them one tile** into an
-  adjacent square (from you, away). Needs a networked "push" action in the
-  trust-based model.
+### 4. Player collision + push-to-shove — SHIPPED 2026-09-16
+Entities can't share a tile (collision blocks it). Press **E** to shove the
+nearest adjacent person one tile away: bots move locally, real peers get a
+networked "push" message (added `send`/`onMessage` to both net adapters) that
+their own client applies. Peer push is only lightly tested (needs two live
+clients).
 
 ### 5. Still queued from the earlier feature batch
 - **Rooms + lockable doors**: expansions become small side-rooms joined by

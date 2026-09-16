@@ -15,6 +15,7 @@ export function makeSupabaseNet(myId, room) {
   let channel = null;
   let sharedCb = () => {};
   let peersCb = () => {};
+  let msgCb = () => {};
   let myPresence = null;
   let lastPresenceSent = 0;
 
@@ -52,7 +53,8 @@ export function makeSupabaseNet(myId, room) {
             const st = payload.new && payload.new.state;
             if (st) sharedCb(st);
           }
-        );
+        )
+        .on("broadcast", { event: "msg" }, (p) => { if (p && p.payload) msgCb(p.payload); });
 
       await new Promise((resolve, reject) => {
         channel.subscribe((status, err) => {
@@ -98,5 +100,8 @@ export function makeSupabaseNet(myId, room) {
     },
 
     onPeers(cb) { peersCb = cb; },
+
+    send(payload) { if (channel) channel.send({ type: "broadcast", event: "msg", payload }); },
+    onMessage(cb) { msgCb = cb; },
   };
 }
