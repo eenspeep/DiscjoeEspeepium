@@ -6,7 +6,18 @@ These are the source of truth for planned work; read this before picking up
 
 ## 2026-09-15 — Owner directives (deferred, implement when we return)
 
-### 1. Shop = 10 tiers, factorial scaling (MOST IMPORTANT)
+### 1. Shop = 10 tiers, factorial scaling (MOST IMPORTANT) — SHIPPED 2026-09-16
+Implemented: 10 research tiers (named Supply Closet … Post-Work Reality), whole
+tiers unlock via research, no per-item locks (locked tiers show as roadmap
+headers, next tier shows RP progress), price + usefulness scale factorially
+(t!), items get more esoteric each tier. Calibration: base furniture = 900¢ =
+~15 min at 1¢/s; four tier-3 items adjacent ≈ 3× = ~5 min. Note the
+constant-payoff property (cost and value both scale by t!, so raw payback time
+per item is roughly constant across tiers; acceleration comes from stacking
+items, gear multipliers, the pot buff, and research). Original request kept
+below for reference.
+
+
 Replace the current model of researching / locking **individual items**. The shop
 should instead be organized into **10 tiers**.
 

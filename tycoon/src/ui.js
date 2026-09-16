@@ -13,9 +13,9 @@ import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
   expandCost, canExpand, statScales, SPECIALTIES, ADJECTIVES, adjSummary, STATS,
   PROPOSALS, proposalById, voteWeight,
-  ITEMS, ITEM_SLOTS, SLOT_LABEL, SHOP_ORDER, itemCells, bagGrid, bagFreeCells,
-  furnitureTier, itemTier, furnitureWork, itemWork, isFurnitureUnlocked, isItemUnlocked,
-  currentTier, nextTier, researchTotal, siteProgress,
+  ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
+  furnitureTier, itemTier, furnitureWork, itemWork, isFurnitureUnlocked, tierUnlocked,
+  currentTier, nextTier, researchTotal, siteProgress, tierPower, TIER_COUNT,
 } from "./economy.js";
 import { BASE_LOOK, drawJoey, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setSelected } from "./world.js";
@@ -82,7 +82,7 @@ function renderHud() {
       me.created ? el("div", { class: "stat-chips" }, [
         el("span", { class: "schip brain", title: "BRAIN", text: STATS.brain.glyph + " " + me.stats.brain }),
         el("span", { class: "schip build", title: "BUILD", text: STATS.build.glyph + " " + me.stats.build }),
-        el("span", { class: "schip research", title: researchTitle(), text: "🔬 T" + currentTier(state.shared) }),
+        el("span", { class: "schip research", title: researchTitle(), text: "🔬 T" + currentTier(state.shared) + "/" + TIER_COUNT }),
       ]) : null,
     ]),
     el("div", { class: "hud-right" }, [
@@ -103,18 +103,19 @@ function renderBuildbar() {
   if (!state.me.created) { buildbar.replaceChildren(); return; }
   const s = state.shared, active = getBuild();
   const cursor = el("button", { class: "build-btn cursor" + (active ? "" : " active"), title: "Walk mode", onclick: () => selectBuild(null) }, [el("span", { class: "b-glyph", text: "👆" }), el("span", { class: "b-name", text: "Walk" })]);
-  const btns = FURNITURE_ORDER.map((type) => {
+  const btns = FURNITURE_ORDER.filter((type) => isFurnitureUnlocked(type, s)).map((type) => {
     const def = FURNITURE[type], cost = furnitureBuyCost(s, type), afford = state.me.credits >= cost;
-    const locked = !isFurnitureUnlocked(type, s);
-    if (locked) return el("button", { class: "build-btn locked", title: def.name + " — needs research Tier " + furnitureTier(type), onclick: () => flash(def.name + " needs research Tier " + furnitureTier(type) + ". Use BRAIN furniture.") },
-      [el("span", { class: "b-glyph", text: "🔒" }), el("span", { class: "b-name", text: def.name }), el("span", { class: "b-cost", text: "T" + furnitureTier(type) })]);
-    return el("button", { class: "build-btn " + (TAG_CLASS[def.tag] || "") + (active === type ? " active" : "") + (afford ? "" : " poor"), title: def.name + " — " + def.tag.toUpperCase() + ", +" + def.value + "/s adjacent · " + furnitureWork(type) + " build work", onclick: () => selectBuild(type) },
+    const val = Math.round(furnitureValue({ type, level: 1 }) * 100) / 100;
+    return el("button", { class: "build-btn " + (TAG_CLASS[def.tag] || "") + (active === type ? " active" : "") + (afford ? "" : " poor"), title: def.name + " (T" + def.tier + ") — " + def.tag.toUpperCase() + ", +" + fmt(val) + "/s adjacent · " + furnitureWork(type) + " work", onclick: () => selectBuild(type) },
       [el("span", { class: "b-glyph", text: def.glyph }), el("span", { class: "b-name", text: def.name }), el("span", { class: "b-cost", text: fmt(cost) })]);
   });
   const expand = canExpand(s)
     ? el("button", { class: "build-btn expand" + (state.me.credits >= expandCost(s) ? "" : " poor"), title: "Grow the floor", onclick: () => { const r = tryExpandFloor(); flash(r.ok ? "The office grew." : (r.why || "Can't expand.")); } }, [el("span", { class: "b-glyph", text: "➕" }), el("span", { class: "b-name", text: "Expand" }), el("span", { class: "b-cost", text: fmt(expandCost(s)) })])
     : el("button", { class: "build-btn expand disabled" }, [el("span", { class: "b-glyph", text: "🏢" }), el("span", { class: "b-name", text: "Max" })]);
-  buildbar.replaceChildren(cursor, ...btns, expand);
+  const nt = nextTier(s);
+  const teaser = nt ? el("button", { class: "build-btn locked", title: "Research " + (nt.need - nt.have) + " more to unlock Tier " + nt.tier, onclick: () => flash("Next: Tier " + nt.tier + " " + nt.name + " — " + nt.have + "/" + nt.need + " research. Stand at BRAIN furniture.") },
+    [el("span", { class: "b-glyph", text: "🔒" }), el("span", { class: "b-name", text: "Tier " + nt.tier }), el("span", { class: "b-cost", text: "🔬" })]) : null;
+  buildbar.replaceChildren(cursor, ...btns, expand, ...(teaser ? [teaser] : []));
 }
 function selectBuild(type) { setBuild(getBuild() === type ? null : type); if (getBuild()) flash("Click a tile to place your " + FURNITURE[getBuild()].name + "."); renderBuildbar(); }
 
@@ -158,9 +159,11 @@ function renderSite() {
 function toggleLocker() { if (openView === "locker") return closePanel(); openView = "locker"; setSelected(null); renderLocker(); showPanel(); }
 
 function itemBuffText(def) {
-  if (def.value) return "+" + def.value + "/s" + (def.tag && def.tag !== "neutral" ? " " + def.tag[0].toUpperCase() : "");
+  if (def.value) return "+" + fmt(Math.round(def.value * tierPower(def.tier) * 100) / 100) + "/s" + (def.tag && def.tag !== "neutral" ? " " + def.tag[0].toUpperCase() : "");
   if (def.mult) return "+" + Math.round(def.mult * 100) + "%";
   if (def.speedMult) return "+" + Math.round(def.speedMult * 100) + "% spd";
+  if (def.buildBonus) return "+" + def.buildBonus + " build";
+  if (def.researchBonus) return "+" + def.researchBonus + " rsch";
   if (def.grid) return def.grid.w + "×" + def.grid.h + " bag";
   return "";
 }
@@ -224,25 +227,26 @@ function renderLocker() {
     });
   }
 
-  // shop
-  kids.push(el("div", { class: "ward-label", text: "Shop" }));
-  for (const type of SHOP_ORDER) {
-    const def = ITEMS[type]; if (!def) continue;
-    const ext = itemCells(type).reduce((m, c) => ({ w: Math.max(m.w, c[0] + 1), h: Math.max(m.h, c[1] + 1) }), { w: 1, h: 1 });
-    const locked = !isItemUnlocked(type, state.shared);
-    if (locked) {
-      kids.push(el("button", { class: "shop-row locked", onclick: () => flash(def.name + " needs research Tier " + itemTier(type) + ". Use BRAIN furniture.") }, [
-        el("span", { class: "shop-glyph", text: "🔒" }),
-        el("span", { class: "shop-body" }, [el("span", { class: "shop-name", text: def.name }), el("span", { class: "shop-meta muted small", text: "Research Tier " + itemTier(type) })]),
-        el("span", { class: "shop-price", text: fmt(def.price) }),
-      ]));
-      continue;
+  // shop — grouped by research tier (whole tiers unlock; no per-item locks)
+  kids.push(el("div", { class: "ward-label", text: "Shop · research unlocks tiers" }));
+  for (const grp of shopByTier()) {
+    if (!grp.items.length) continue;
+    if (tierUnlocked(grp.tier, state.shared)) {
+      kids.push(el("div", { class: "tier-head", text: "Tier " + grp.tier + " · " + grp.name }));
+      for (const type of grp.items) {
+        const def = ITEMS[type];
+        const ext = itemCells(type).reduce((m, c) => ({ w: Math.max(m.w, c[0] + 1), h: Math.max(m.h, c[1] + 1) }), { w: 1, h: 1 });
+        kids.push(el("button", { class: "shop-row", onclick: () => { const r = tryBuyItem(type); flash(r.ok ? "Building " + def.name + " (" + itemWork(type) + " work)…" : (r.why || "Can't buy.")); } }, [
+          el("span", { class: "shop-glyph", text: def.glyph }),
+          el("span", { class: "shop-body" }, [el("span", { class: "shop-name", text: def.name }), el("span", { class: "shop-meta muted small", text: (itemBuffText(def) || SLOT_LABEL[def.slot] || "") + " · " + ext.w + "×" + ext.h + " · " + itemWork(type) + "w" })]),
+          el("span", { class: "shop-price", text: fmt(itemPrice(type)) }),
+        ]));
+      }
+    } else {
+      const nt = nextTier(state.shared);
+      const isNext = nt && nt.tier === grp.tier;
+      kids.push(el("div", { class: "tier-head locked", text: "🔒 Tier " + grp.tier + " · " + grp.name + (isNext ? " — " + fmt(nt.have) + "/" + fmt(nt.need) + " research" : "") }));
     }
-    kids.push(el("button", { class: "shop-row", onclick: () => { const r = tryBuyItem(type); flash(r.ok ? "Building " + def.name + " (" + itemWork(type) + " work)…" : (r.why || "Can't buy.")); } }, [
-      el("span", { class: "shop-glyph", text: def.glyph }),
-      el("span", { class: "shop-body" }, [el("span", { class: "shop-name", text: def.name }), el("span", { class: "shop-meta muted small", text: (itemBuffText(def) || SLOT_LABEL[def.slot] || "") + " · " + ext.w + "×" + ext.h + " · " + itemWork(type) + "w" })]),
-      el("span", { class: "shop-price", text: fmt(def.price) }),
-    ]));
   }
 
   // base look

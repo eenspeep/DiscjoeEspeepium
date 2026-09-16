@@ -398,3 +398,7 @@ body {
 .queue-body { flex: 1; display: flex; flex-direction: column; gap: 4px; }
 .qbar { height: 6px; background: #dfe4ec; border-radius: 4px; overflow: hidden; }
 .qbar-fill { height: 100%; background: #c9772f; border-radius: 4px; transition: width 0.3s linear; }
+
+/* ---- shop tier headers -------------------------------------------------- */
+.tier-head { font-family: "Fredoka", sans-serif; font-weight: 600; font-size: 13px; color: var(--brand-ink); margin: 14px 0 4px; padding-bottom: 3px; border-bottom: 2px solid var(--line); }
+.tier-head.locked { color: var(--muted); border-bottom-style: dashed; }
