@@ -402,3 +402,8 @@ body {
 /* ---- shop tier headers -------------------------------------------------- */
 .tier-head { font-family: "Fredoka", sans-serif; font-weight: 600; font-size: 13px; color: var(--brand-ink); margin: 14px 0 4px; padding-bottom: 3px; border-bottom: 2px solid var(--line); }
 .tier-head.locked { color: var(--muted); border-bottom-style: dashed; }
+
+/* ---- SOUL / esotericism ------------------------------------------------- */
+.schip.soul { color: #7a3fb8; }
+.shop-row.eso-locked { opacity: 0.7; cursor: help; }
+.shop-row.eso-locked .shop-name { color: #7a3fb8; }

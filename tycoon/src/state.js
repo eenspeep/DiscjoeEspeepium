@@ -11,7 +11,8 @@ import {
   ITEMS, ITEM_SLOTS, firstFit, fitsAt, itemCells, bagGrid,
   weekStartFor, everyoneVoted, tallyVotes, proposalById, PROPOSALS,
   furnitureWork, itemWork, itemPrice, isFurnitureUnlocked, isItemUnlocked,
-  buildPower, rpRate, siteProgress, isUsing,
+  buildPower, rpRate, soulRate, siteProgress, isUsing,
+  currentTier, currentEso, furnitureTier, itemTier, esoOfFurniture, esoOfItem,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -80,6 +81,8 @@ function healMe(me) {
   if (typeof me.credits !== "number") me.credits = TUNING.startCredits;
   me.pos = me.pos || { x: 0, y: 0 };
   me.buildQueue = Array.isArray(me.buildQueue) ? me.buildQueue : [];
+  if (typeof me.soul !== "number") me.soul = 0;
+  if (typeof me.soulMult !== "number") me.soulMult = 1; // raised by kills in the combat patch
   healInventory(me);
   return me;
 }
@@ -185,6 +188,8 @@ export function tickEconomy() {
     const dt = (t - (me.lastTick || t)) / 1000; me.lastTick = t;
     if (dt > 0) {
       me.credits = round2(me.credits + income(me, state.shared) * dt);
+      const soul = soulRate(me, state.shared) * dt;
+      if (soul > 0) me.soul = round2(me.soul + soul);
       state.meDirty = true;
       buildTick(dt);
     }
@@ -272,7 +277,8 @@ export function tryPlaceFurniture(type, gx, gy) {
   const s = state.shared, key = `${gx},${gy}`;
   if (!inBounds(gx, gy)) return { ok: false, why: "Outside the floor." };
   if (s.furniture[key] || s.sites[key]) return { ok: false, why: "That tile is taken." };
-  if (!isFurnitureUnlocked(type, s)) return { ok: false, why: "Not researched yet — use BRAIN furniture." };
+  if (furnitureTier(type) > currentTier(s)) return { ok: false, why: "That tier isn't researched yet — use BRAIN furniture." };
+  if (esoOfFurniture(type) > currentEso(state.me)) return { ok: false, why: "Not esoteric enough — channel SOUL at an altar." };
   const cost = furnitureBuyCost(s, type);
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
   spend(cost);
@@ -312,7 +318,8 @@ export function tryExpandFloor() {
 export function tryBuyItem(type) {
   const def = ITEMS[type], price = itemPrice(type);
   if (!def || !price) return { ok: false, why: "Not for sale." };
-  if (!isItemUnlocked(type, state.shared)) return { ok: false, why: "That tier isn't researched yet — use BRAIN furniture." };
+  if (itemTier(type) > currentTier(state.shared)) return { ok: false, why: "That tier isn't researched yet — use BRAIN furniture." };
+  if (esoOfItem(type) > currentEso(state.me)) return { ok: false, why: "Not esoteric enough — channel SOUL at an altar." };
   if (state.me.credits < price) return { ok: false, why: "Not enough credits." };
   spend(price);
   state.me.buildQueue.push({ type, work: itemWork(type), prog: 0 });

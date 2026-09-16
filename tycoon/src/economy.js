@@ -92,6 +92,9 @@ export const FURNITURE = {
   fabricator: { name: "Fabricator Bay", glyph: "🏭", tag: "build", tier: 9, unit: 1.9, costUnit: 2.0, h: 20 },
   singularity: { name: "Singularity Server", glyph: "🌌", tag: "brain", tier: 10, unit: 2.2, costUnit: 2.5, h: 26 },
   realitypress: { name: "Reality Press", glyph: "💥", tag: "build", tier: 10, unit: 2.2, costUnit: 2.5, h: 22 },
+  // Esoteric altars generate personal SOUL for whoever channels (stands) at them.
+  altar: { name: "Esoteric Altar", glyph: "🔮", tag: "neutral", tier: 2, unit: 0.3, costUnit: 1.3, h: 14, soul: 1.0 },
+  obelisk: { name: "Obsidian Obelisk", glyph: "🗿", tag: "neutral", tier: 6, unit: 0.5, costUnit: 1.6, h: 22, soul: 3.0 },
 };
 export const FURNITURE_ORDER = Object.keys(FURNITURE).sort((a, b) => FURNITURE[a].tier - FURNITURE[b].tier);
 
@@ -156,6 +159,11 @@ export const ITEMS = {
   ringbinder: { name: "The One Ring Binder", slot: "hands", tier: 10, mult: 0.4, shape: "domino", glyph: "📕", color: "#b8455a", costUnit: 3.2 },
   sentienttie: { name: "Sentient Necktie", slot: "torso", tier: 10, mult: 0.6, shape: "square", glyph: "👔", color: "#4b3b6b", costUnit: 3.4 },
   infinitybag: { name: "Infinity Briefcase", slot: "bag", tier: 10, grid: { w: 6, h: 6 }, mult: 0.1, shape: "square", art: "bag", glyph: "💼", color: "#1c1c22", costUnit: 3.6 },
+  // SOUL gear — boosts how fast you channel soul at altars. The first is Eso 0
+  // so you can bootstrap soul before the esoteric column opens.
+  candlehat: { name: "Candle Hat", slot: "head", tier: 3, soulBonus: 0.4, shape: "triL", glyph: "🕯️", color: "#c98a2b", costUnit: 1.2 },
+  ouija: { name: "Ouija Pendant", slot: "nose", tier: 4, soulBonus: 0.6, shape: "dot", glyph: "🔯", color: "#5a3fb8", costUnit: 1.4 },
+  ritualrobes: { name: "Ritual Robes", slot: "torso", tier: 6, soulBonus: 1.2, shape: "square", glyph: "👘", color: "#3b2b5b", costUnit: 1.8 },
   // special: black mark (combat patch). Immovable.
   blackmark: { name: "Black Mark", slot: null, tier: 1, art: "blackmark", glyph: "🖤", color: "#1c1c22", shape: "dot", immovable: true, noSell: true, noEquip: true },
 };
@@ -332,9 +340,53 @@ export function nextTier(shared) {
   if (t >= TIER_COUNT) return null;
   return { tier: t + 1, name: TIER_NAME[t + 1], need: RESEARCH_TIERS[t + 1], have: Math.floor(researchTotal(shared)) };
 }
-export function isFurnitureUnlocked(type, shared) { return furnitureTier(type) <= currentTier(shared); }
-export function isItemUnlocked(type, shared) { return itemTier(type) <= currentTier(shared); }
 export function tierUnlocked(tier, shared) { return tier <= currentTier(shared); }
+
+// ---- SOUL / esotericism (personal, horizontal axis) -----------------------
+// Vertical = research tier (shared). Horizontal = esotericism level, unlocked by
+// your personal SOUL (channeled at altars, boosted by soul gear and later kills).
+
+const ESO_THRESHOLDS = [0, 120, 600, 2400];   // soul needed for eso level 0..3
+export const ESO_MAX = ESO_THRESHOLDS.length - 1;
+export const ESO_NAME = ["Mundane", "Curious", "Uncanny", "Eldritch"];
+// which items/furniture are esoteric (>0). Everything else is a default (Eso 0).
+const ESO_ITEM = { focusvisor: 1, mustachewax: 1, goldstapler: 1, ouija: 1, thirdeye: 2, neurallace: 2, antigravboots: 2, ritualrobes: 2, crown: 2, timewatch: 3, hivemind: 3, sentienttie: 3, ringbinder: 3, infinitybag: 3 };
+const ESO_FURN = { quantumboard: 1, obelisk: 1, fabricator: 1, aicluster: 2, oracle: 2, singularity: 2 };
+export function esoOfItem(type) { return ESO_ITEM[type] || 0; }
+export function esoOfFurniture(type) { return ESO_FURN[type] || 0; }
+
+export function currentEso(me) {
+  const s = (me && me.soul) || 0; let e = 0;
+  for (let i = 0; i < ESO_THRESHOLDS.length; i++) if (s >= ESO_THRESHOLDS[i]) e = i;
+  return e;
+}
+export function esoUnlocked(level, me) { return level <= currentEso(me); }
+export function nextEso(me) {
+  const e = currentEso(me);
+  if (e >= ESO_MAX) return null;
+  return { level: e + 1, name: ESO_NAME[e + 1], need: ESO_THRESHOLDS[e + 1], have: Math.floor((me && me.soul) || 0) };
+}
+export function esoNeed(level) { return ESO_THRESHOLDS[level] || 0; }
+
+// SOUL/sec you channel from adjacent altars, times your soul-gear multiplier and
+// the (future, kill-driven) soulMult.
+export function soulRate(me, shared) {
+  if (!shared || !shared.furniture || !me.pos) return 0;
+  let base = 0;
+  for (const [key, f] of Object.entries(shared.furniture)) {
+    const [gx, gy] = key.split(",").map(Number);
+    const def = FURNITURE[f.type];
+    if (def.soul && isUsing(me.pos, gx, gy)) base += def.soul * (1 + 0.5 * (f.level - 1));
+  }
+  if (base <= 0) return 0;
+  let mult = 1;
+  for (const d of equippedDefs(me)) if (d.soulBonus) mult += d.soulBonus;
+  return Math.round(base * TUNING.soulScale * mult * ((me && me.soulMult) || 1) * 100) / 100;
+}
+
+// Unlock = research tier reached AND (personal) esotericism reached.
+export function isFurnitureUnlocked(type, shared, me) { return furnitureTier(type) <= currentTier(shared) && esoOfFurniture(type) <= currentEso(me); }
+export function isItemUnlocked(type, shared, me) { return itemTier(type) <= currentTier(shared) && esoOfItem(type) <= currentEso(me); }
 
 // ---- team pot -------------------------------------------------------------
 

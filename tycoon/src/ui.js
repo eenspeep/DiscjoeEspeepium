@@ -14,8 +14,9 @@ import {
   expandCost, canExpand, statScales, SPECIALTIES, ADJECTIVES, adjSummary, STATS,
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
-  furnitureTier, itemTier, furnitureWork, itemWork, isFurnitureUnlocked, tierUnlocked,
+  furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
   currentTier, nextTier, researchTotal, siteProgress, tierPower, TIER_COUNT,
+  esoOfItem, esoOfFurniture, currentEso, nextEso, ESO_MAX, ESO_NAME,
 } from "./economy.js";
 import { BASE_LOOK, drawJoey, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setSelected } from "./world.js";
@@ -52,6 +53,11 @@ function researchTitle() {
   if (!nt) return "Research maxed — all tiers unlocked";
   return "Research tier " + currentTier(state.shared) + " · " + Math.floor(researchTotal(state.shared)) + "/" + nt.need + " to Tier " + nt.tier + " (use BRAIN furniture)";
 }
+function soulTitle() {
+  const ne = nextEso(state.me);
+  if (!ne) return "Esotericism maxed — SOUL " + Math.floor(state.me.soul);
+  return "SOUL " + Math.floor(state.me.soul) + " · " + ne.have + "/" + ne.need + " to " + ne.name + " (channel at an esoteric altar)";
+}
 
 export function flash(msg) {
   const t = el("div", { class: "toast-item", text: msg });
@@ -83,6 +89,7 @@ function renderHud() {
         el("span", { class: "schip brain", title: "BRAIN", text: STATS.brain.glyph + " " + me.stats.brain }),
         el("span", { class: "schip build", title: "BUILD", text: STATS.build.glyph + " " + me.stats.build }),
         el("span", { class: "schip research", title: researchTitle(), text: "🔬 T" + currentTier(state.shared) + "/" + TIER_COUNT }),
+        el("span", { class: "schip soul", title: soulTitle(), text: "🔮 E" + currentEso(me) + "/" + ESO_MAX }),
       ]) : null,
     ]),
     el("div", { class: "hud-right" }, [
@@ -101,12 +108,18 @@ const TAG_CLASS = { brain: "t-brain", build: "t-build", neutral: "t-neutral" };
 function renderBuildbar() {
   if (!buildbar) return;
   if (!state.me.created) { buildbar.replaceChildren(); return; }
-  const s = state.shared, active = getBuild();
+  const s = state.shared, active = getBuild(), me = state.me;
   const cursor = el("button", { class: "build-btn cursor" + (active ? "" : " active"), title: "Walk mode", onclick: () => selectBuild(null) }, [el("span", { class: "b-glyph", text: "👆" }), el("span", { class: "b-name", text: "Walk" })]);
-  const btns = FURNITURE_ORDER.filter((type) => isFurnitureUnlocked(type, s)).map((type) => {
-    const def = FURNITURE[type], cost = furnitureBuyCost(s, type), afford = state.me.credits >= cost;
+  const btns = FURNITURE_ORDER.filter((type) => furnitureTier(type) <= currentTier(s)).map((type) => {
+    const def = FURNITURE[type];
+    const esoReq = esoOfFurniture(type);
+    if (esoReq > currentEso(me)) {
+      return el("button", { class: "build-btn locked", title: def.name + " — needs " + ESO_NAME[esoReq] + " esotericism", onclick: () => flash(def.name + " needs " + ESO_NAME[esoReq] + " soul. Channel at an esoteric altar.") },
+        [el("span", { class: "b-glyph", text: "🔮" }), el("span", { class: "b-name", text: def.name }), el("span", { class: "b-cost", text: "E" + esoReq })]);
+    }
+    const cost = furnitureBuyCost(s, type), afford = me.credits >= cost;
     const val = Math.round(furnitureValue({ type, level: 1 }) * 100) / 100;
-    return el("button", { class: "build-btn " + (TAG_CLASS[def.tag] || "") + (active === type ? " active" : "") + (afford ? "" : " poor"), title: def.name + " (T" + def.tier + ") — " + def.tag.toUpperCase() + ", +" + fmt(val) + "/s adjacent · " + furnitureWork(type) + " work", onclick: () => selectBuild(type) },
+    return el("button", { class: "build-btn " + (TAG_CLASS[def.tag] || "") + (active === type ? " active" : "") + (afford ? "" : " poor"), title: def.name + " (T" + def.tier + ") — " + (def.soul ? "channel SOUL here · " : "") + def.tag.toUpperCase() + ", +" + fmt(val) + "/s adjacent · " + furnitureWork(type) + " work", onclick: () => selectBuild(type) },
       [el("span", { class: "b-glyph", text: def.glyph }), el("span", { class: "b-name", text: def.name }), el("span", { class: "b-cost", text: fmt(cost) })]);
   });
   const expand = canExpand(s)
@@ -164,6 +177,7 @@ function itemBuffText(def) {
   if (def.speedMult) return "+" + Math.round(def.speedMult * 100) + "% spd";
   if (def.buildBonus) return "+" + def.buildBonus + " build";
   if (def.researchBonus) return "+" + def.researchBonus + " rsch";
+  if (def.soulBonus) return "+" + Math.round(def.soulBonus * 100) + "% soul";
   if (def.grid) return def.grid.w + "×" + def.grid.h + " bag";
   return "";
 }
@@ -236,6 +250,15 @@ function renderLocker() {
       for (const type of grp.items) {
         const def = ITEMS[type];
         const ext = itemCells(type).reduce((m, c) => ({ w: Math.max(m.w, c[0] + 1), h: Math.max(m.h, c[1] + 1) }), { w: 1, h: 1 });
+        const esoReq = esoOfItem(type);
+        if (esoReq > currentEso(me)) {
+          kids.push(el("button", { class: "shop-row eso-locked", onclick: () => flash(def.name + " needs " + ESO_NAME[esoReq] + " soul. Channel at an esoteric altar.") }, [
+            el("span", { class: "shop-glyph", text: "🔮" }),
+            el("span", { class: "shop-body" }, [el("span", { class: "shop-name", text: def.name }), el("span", { class: "shop-meta muted small", text: "🔮 " + ESO_NAME[esoReq] + " · " + (itemBuffText(def) || SLOT_LABEL[def.slot] || "") })]),
+            el("span", { class: "shop-price", text: fmt(itemPrice(type)) }),
+          ]));
+          continue;
+        }
         kids.push(el("button", { class: "shop-row", onclick: () => { const r = tryBuyItem(type); flash(r.ok ? "Building " + def.name + " (" + itemWork(type) + " work)…" : (r.why || "Can't buy.")); } }, [
           el("span", { class: "shop-glyph", text: def.glyph }),
           el("span", { class: "shop-body" }, [el("span", { class: "shop-name", text: def.name }), el("span", { class: "shop-meta muted small", text: (itemBuffText(def) || SLOT_LABEL[def.slot] || "") + " · " + ext.w + "×" + ext.h + " · " + itemWork(type) + "w" })]),

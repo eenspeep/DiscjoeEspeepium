@@ -46,6 +46,7 @@ export const TUNING = {
   // furniture value, times (1 + brain * researchStatBonus).
   researchScale: 0.2,        // RP/sec per adjacent BRAIN-furniture tier
   researchStatBonus: 0.10,
+  soulScale: 0.15,           // SOUL/sec per unit of adjacent altar "soul" (before gear/kill mult)
   // Cumulative room research needed to reach each tier (index = tier).
   researchTiers: [0, 150, 600, 2000, 6000],
 
