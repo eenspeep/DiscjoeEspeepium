@@ -16,6 +16,7 @@ import {
   currentTier, currentEso, furnitureTier, itemTier, esoOfFurniture, esoOfItem,
   footprintCells, blockedTiles, furnitureAnchorAt, hasSurface, isModUnlocked, modPrice,
   equippedWeapon, lowestShield, blackMarkCells,
+  buildRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -87,6 +88,7 @@ function healMe(me) {
   if (typeof me.soul !== "number") me.soul = 0;
   if (typeof me.soulMult !== "number") me.soulMult = 1; // raised by kills
   if (typeof me.kills !== "number") me.kills = 0;       // drives black marks
+  if (!me.traits || typeof me.traits !== "object") me.traits = {};
   healInventory(me);
   return me;
 }
@@ -113,13 +115,13 @@ export function setAccount(acc) { state.account = acc; }
 export function createJoey({ specialty, adjectiveWord, look }) {
   const me = state.me;
   const adj = ADJECTIVES.find((a) => a.word === adjectiveWord);
-  const { stats, buffs } = buildStats(specialty, adj);
+  const { stats, traits } = buildStats(specialty, adj);
   me.specialty = SPECIALTIES[specialty] ? specialty : "brain";
   me.adjectiveWord = adjectiveWord;
   me.name = "JOEY " + adjectiveWord;
-  me.stats = stats; me.buffs = buffs;
+  me.stats = stats; me.traits = traits;
   me.look = { ...defaultLook(), ...(look || {}) };
-  me.credits = TUNING.startCredits;
+  me.credits = TUNING.startCredits + 100 * (traits.startMoney || 0);   // "Starting money" trait
   me.created = true;
   me.lastTick = now(); me.lastSeen = now();
   centerMe(); saveMe(); notify();
@@ -206,7 +208,8 @@ function applyOffline() {
   const me = state.me;
   const elapsed = clamp((now() - (me.lastSeen || now())) / 1000, 0, TUNING.offlineCapHours * 3600);
   if (elapsed > 5) {
-    const gained = round2(income(me, state.shared, { passiveOnly: true }) * elapsed);
+    const offlineMult = 1 + 0.1 * traitVal(me, "offline");   // "Offline earning" trait
+    const gained = round2(income(me, state.shared, { passiveOnly: true }) * elapsed * offlineMult);
     me.credits = round2(me.credits + gained);
     state.lastOffline = { seconds: elapsed, gained };
   }
@@ -237,9 +240,10 @@ export function tickEconomy() {
 function buildTick(dt) {
   const me = state.me, s = state.shared, power = buildPower(me, s);
 
+  const bReach = buildRange(me);
   for (const [key, site] of Object.entries(s.sites || {})) {
     const [gx, gy] = key.split(",").map(Number);
-    if (!isNearFootprint(me.pos, site.type, gx, gy, TUNING.adjacencyRange)) continue;
+    if (!isNearFootprint(me.pos, site.type, gx, gy, bReach)) continue;
     site.progBy = site.progBy || {};
     site.progBy[me.id] = round2((site.progBy[me.id] || 0) + power * dt);
     state.dirty = true;
@@ -251,7 +255,7 @@ function buildTick(dt) {
     }
   }
 
-  const rp = rpRate(me, s) * dt;
+  const rp = rpRate(me, s) * dt * (1 + 0.2 * traitVal(me, "researchWeight"));   // "Research weight" trait
   if (rp > 0) {
     s.research.contrib = s.research.contrib || {};
     s.research.contrib[me.id] = round2((s.research.contrib[me.id] || 0) + rp);
@@ -317,7 +321,7 @@ export function tryPlaceFurniture(type, gx, gy, rot = 0) {
   for (const [cx, cy] of cells) if (blocked.has(cx + "," + cy) || (s.doors && s.doors[cx + "," + cy])) return { ok: false, why: "That space is taken." };
   const occ = entityTiles();
   for (const [cx, cy] of cells) if (occ.has(cx + "," + cy)) return { ok: false, why: "Someone's standing there." };
-  const cost = furnitureBuyCost(s, type);
+  const cost = Math.ceil(furnitureBuyCost(s, type) * (1 - discountFrac(state.me)));   // "Shop discount" trait
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
   spend(cost);
   s.sites[key] = { type, rot, work: furnitureWork(type), progBy: {}, started: now() };
@@ -344,14 +348,14 @@ export function tryRemoveMod(gx, gy) {
   if (!fKey) return { ok: false };
   const f = s.furniture[fKey], mk = gx + "," + gy;
   if (!f.mods || !f.mods[mk]) return { ok: false };
-  const refund = Math.ceil(modPrice(f.mods[mk]) * 0.4);
+  const refund = Math.ceil(modPrice(f.mods[mk]) * refundFrac(state.me));
   delete f.mods[mk]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
   return { ok: true, refund };
 }
 
 export function cancelSite(key) {
   const s = state.shared, site = s.sites[key]; if (!site) return { ok: false };
-  const refund = Math.ceil(furnitureBuyCost(s, site.type) * 0.4);
+  const refund = Math.ceil(furnitureBuyCost(s, site.type) * refundFrac(state.me));
   delete s.sites[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
   return { ok: true, refund };
 }
@@ -364,7 +368,7 @@ export function tryUpgradeFurniture(key) {
 export function trySellFurniture(key) {
   const s = state.shared, f = s.furniture[key]; if (!f) return { ok: false };
   if (Array.isArray(f.by) && f.by.length && !f.by.includes(state.me.id)) return { ok: false, why: "Only its builders can sell it." };
-  const refund = Math.ceil(furnitureBuyCost(s, f.type) * 0.4);
+  const refund = Math.ceil(furnitureBuyCost(s, f.type) * refundFrac(state.me));
   delete s.furniture[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
   return { ok: true, refund };
 }
@@ -417,7 +421,7 @@ export function checkDoorPassword(key, password) {
 export function tryRemoveDoor(key) {
   const s = state.shared, d = s.doors[key]; if (!d) return { ok: false };
   if (d.by !== state.me.id) return { ok: false, why: "Only the owner can remove it." };
-  const refund = Math.ceil(TUNING.doorCost * 0.4 + (d.locked ? TUNING.lockCost * 0.3 : 0));
+  const refund = Math.ceil(TUNING.doorCost * refundFrac(state.me) + (d.locked ? TUNING.lockCost * 0.3 : 0));
   delete s.doors[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
   return { ok: true, refund };
 }
@@ -437,7 +441,7 @@ export function useWeapon() {
   const me = state.me, w = equippedWeapon(me);
   if (!w) return null;
   const inst = me.items[w.uid];
-  inst.uses = (inst.uses != null ? inst.uses : w.def.uses) - 1;
+  inst.uses = (inst.uses != null ? inst.uses : (w.def.uses + weaponBonus(me))) - 1;   // "Weapon durability" trait
   if (inst.uses <= 0) { delete me.items[w.uid]; me.equipment.weapon = null; }
   state.meDirty = true; saveMe(); notify();
   return w.def;
@@ -494,7 +498,7 @@ export function registerKill(victimName) {
   const me = state.me;
   me.kills = (me.kills || 0) + 1;
   me.soulMult = round2((me.soulMult || 1) + TUNING.killSoulMult);
-  if (me.kills === 1) state.justFirstKill = true;
+  if (me.kills <= killFreebies(me)) state.justFirstKill = true;   // "Forgiveness" trait extends the grace
   else state.justBlackMark = true;
   absorbBlackMarks(me);
   state.meDirty = true; saveMe(); notify();
@@ -517,7 +521,8 @@ function absorbBlackMarks(me) {
 
 // The attacker's client got word that its strike killed a peer.
 export function applyKillReward(coins, victimName) {
-  state.me.credits = round2(state.me.credits + (coins || 0)); state.meDirty = true;
+  const take = round2((coins || 0) * (1 + 0.2 * traitVal(state.me, "bounty")));   // "Bounty" trait
+  state.me.credits = round2(state.me.credits + take); state.meDirty = true;
   registerKill(victimName || "someone");
 }
 
@@ -525,10 +530,10 @@ export function applyKillReward(coins, victimName) {
 export function tryPickup(gx, gy) {
   const s = state.shared, key = gx + "," + gy, pile = s.loot && s.loot[key];
   if (!pile || !pile.items.length) return { ok: false };
-  const me = state.me, taken = [], left = [];
+  const me = state.me, taken = [], left = [], scav = 0.15 * traitVal(me, "scavenger");   // "Scavenging" trait
+  const grab = (type) => { const spot = firstFit(me, type); if (!spot) return false; const id = uid(); me.items[id] = { type }; me.bag.placements[id] = { x: spot.x, y: spot.y, rot: spot.rot }; taken.push(type); return true; };
   for (const type of pile.items) {
-    const spot = firstFit(me, type);
-    if (spot) { const id = uid(); me.items[id] = { type }; me.bag.placements[id] = { x: spot.x, y: spot.y, rot: spot.rot }; taken.push(type); }
+    if (grab(type)) { if (scav > 0 && Math.random() < scav) grab(type); }
     else left.push(type);
   }
   if (left.length) pile.items = left; else delete s.loot[key];
@@ -553,7 +558,7 @@ export function killCharlie(cx, cy) {
   if (!s.charlie || !s.charlie.alive) return { ok: false };
   const key = Math.round(cx) + "," + Math.round(cy);
   addLoot(key, charlieDrop());
-  const bounty = Math.max(1, Math.round(TUNING.charlieBountyMult * currentTier(s)));
+  const bounty = Math.max(1, Math.round(TUNING.charlieBountyMult * currentTier(s) * (1 + 0.2 * traitVal(state.me, "bounty"))));   // "Bounty" trait
   state.me.credits = round2(state.me.credits + bounty); state.meDirty = true;
   s.charlie.alive = false; s.charlie.diedAt = now();
   registerKill("Garlic Charlie");
@@ -610,10 +615,11 @@ function charlieTick(t) {
 // ---- inventory actions ----------------------------------------------------
 
 export function tryBuyItem(type) {
-  const def = ITEMS[type], price = itemPrice(type);
-  if (!def || !price) return { ok: false, why: "Not for sale." };
+  const def = ITEMS[type], base = itemPrice(type);
+  if (!def || !base) return { ok: false, why: "Not for sale." };
   if (itemTier(type) > currentTier(state.shared)) return { ok: false, why: "That tier isn't researched yet — use BRAIN furniture." };
   if (esoOfItem(type) > currentEso(state.me)) return { ok: false, why: "Not esoteric enough — channel SOUL at an altar." };
+  const price = Math.ceil(base * (1 - discountFrac(state.me)));   // "Shop discount" trait
   if (state.me.credits < price) return { ok: false, why: "Not enough credits." };
   spend(price);
   state.me.buildQueue.push({ type, work: itemWork(type), prog: 0 });
@@ -623,7 +629,7 @@ export function tryBuyItem(type) {
 
 export function cancelBuild(index) {
   const q = state.me.buildQueue, job = q[index]; if (!job) return { ok: false };
-  const refund = Math.ceil(itemPrice(job.type) * 0.5);
+  const refund = Math.ceil(itemPrice(job.type) * refundFrac(state.me, 0.5));
   q.splice(index, 1); state.me.credits = round2(state.me.credits + refund); saveMe(); notify();
   return { ok: true, refund };
 }
@@ -674,7 +680,7 @@ export function trySellItem(id) {
   const def = ITEMS[inst.type];
   if (def.noSell) return { ok: false, why: "You can't get rid of that." };
   if (!me.bag.placements[id]) return { ok: false, why: "Unequip it first." };
-  const refund = Math.ceil(itemPrice(inst.type) * 0.4);
+  const refund = Math.ceil(itemPrice(inst.type) * refundFrac(me));
   delete me.bag.placements[id]; delete me.items[id];
   me.credits = round2(me.credits + refund); saveMe(); notify();
   return { ok: true, refund };

@@ -12,14 +12,14 @@ import {
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
-  roomCost, canAddRoom, statScales, SPECIALTIES, ADJECTIVES, adjSummary, STATS,
+  roomCost, canAddRoom, statScales, SPECIALTIES, ADJECTIVES, adjSummary, rollAdjectives, RARITY, STATS,
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
   furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
   currentTier, nextTier, researchTotal, siteProgress, tierPower, TIER_COUNT,
   esoOfItem, esoOfFurniture, currentEso, nextEso, ESO_MAX, ESO_NAME,
   MODS, MOD_ORDER, modPrice, isModUnlocked,
-  blackMarkCells, blackMarkSlots,
+  blackMarkCells, blackMarkSlots, TRAITS,
 } from "./economy.js";
 import { BASE_LOOK, drawJoey, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setSelected, unlockDoorLocal } from "./world.js";
@@ -246,6 +246,10 @@ function renderLocker() {
     el("span", { class: "schip brain", text: STATS.brain.glyph + " " + me.stats.brain }),
     el("span", { class: "schip build", text: STATS.build.glyph + " " + me.stats.build }),
   ]));
+  const traitKeys = Object.keys(me.traits || {}).filter((k) => TRAITS[k] && me.traits[k]);
+  if (traitKeys.length) {
+    kids.push(el("div", { class: "trait-line" }, traitKeys.map((k) => el("span", { class: "trait-chip", title: TRAITS[k].label + ": " + TRAITS[k].per(me.traits[k]) }, [TRAITS[k].glyph + " " + TRAITS[k].per(me.traits[k])]))));
+  }
 
   // account row
   kids.push(accountRow());
@@ -422,7 +426,7 @@ function quick(label, fn) { return el("button", { class: "qbtn", onclick: fn }, 
 
 // ---- login modal ----------------------------------------------------------
 
-function openLogin() {
+function openLogin(onDone, required = false) {
   const err = el("div", { class: "login-err small" });
   const u = el("input", { class: "name-input", placeholder: "username", autocomplete: "username" });
   const p = el("input", { class: "name-input", type: "password", placeholder: "password", autocomplete: "current-password" });
@@ -433,11 +437,12 @@ function openLogin() {
       if (!acc) throw new Error("Could not sign in.");
       await auth.applyAuthed(acc);
       back.remove(); flash("Signed in as " + acc.username + "."); refresh();
+      if (onDone) onDone(acc);
     } catch (e) { err.textContent = (e && e.message) || "Something went wrong."; }
   };
   const back = el("div", { class: "modal-back" }, [el("div", { class: "modal login-modal" }, [
     el("h2", { text: "Joe Account" }),
-    el("p", { class: "muted small", text: "Optional. Saves your Joey to the cloud so it survives a cookie wipe or follows you to another device." }),
+    el("p", { class: "muted small", text: required ? "You need an account before you can build a Joey — it saves your Joey to the cloud and follows you across devices." : "Optional. Saves your Joey to the cloud so it survives a cookie wipe or follows you to another device." }),
     el("label", { class: "field" }, [el("span", { class: "field-label", text: "Username" }), u]),
     el("label", { class: "field" }, [el("span", { class: "field-label", text: "Password" }), p]),
     err,
@@ -458,29 +463,64 @@ export function showOffline(info) { if (!info || info.gained < 1) return; flash(
 
 // ---- Build Your Joey ------------------------------------------------------
 
-function shuffle(a) { a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[a[i], a[j]] = [a[j], a[i]]; } return a; }
+const REROLL_MAX = 3;
 function openCreator() {
-  const sel = { specialty: null, look: defaultLook(), three: shuffle(ADJECTIVES).slice(0, 3), adjIndex: null };
+  const sel = { specialty: null, look: defaultLook(), three: rollAdjectives(3), adjIndex: null, rerolls: REROLL_MAX };
+  const acctReady = () => !auth.enabled || !!state.account;
   const preview = el("canvas", { class: "joey-preview", width: "160", height: "190" });
   const drawPreview = () => { const c = preview.getContext("2d"); c.clearRect(0, 0, 160, 190); drawJoey(c, 80, 150, { look: sel.look, worn: {}, scale: 3.2, t: performance.now() / 1000 }); };
   const previewTimer = setInterval(drawPreview, 60);
+
+  // step 1 — account gate
+  const acctRow = el("div", { class: "creator-acct" });
+  const renderAcct = () => {
+    acctRow.replaceChildren();
+    if (!auth.enabled) { acctRow.appendChild(el("span", { class: "muted small", text: "Local build — no account needed here." })); return; }
+    if (state.account) acctRow.appendChild(el("span", { class: "small", text: "☁️ Signed in as " + state.account.username + " — you're good to go." }));
+    else {
+      acctRow.appendChild(el("span", { class: "small", text: "An account is required to build a Joey." }));
+      acctRow.appendChild(el("button", { class: "btn small primary", onclick: () => openLogin(() => { renderAcct(); updateStart(); }, true) }, ["Log in / Sign up"]));
+    }
+  };
+
   const specRow = el("div", { class: "spec-row" }, Object.values(SPECIALTIES).map((sp) => el("button", { class: "spec-card", "data-id": sp.id, onclick: () => { sel.specialty = sp.id; markSpec(); } }, [el("div", { class: "spec-glyph", text: sp.glyph }), el("div", { class: "spec-name", text: sp.name }), el("div", { class: "spec-blurb muted small", text: sp.blurb }), el("div", { class: "spec-start small", text: "Start: 🧠 " + sp.start.brain + "  🔧 " + sp.start.build })])));
   const markSpec = () => { specRow.querySelectorAll(".spec-card").forEach((n) => n.classList.toggle("on", n.getAttribute("data-id") === sel.specialty)); updateStart(); };
   const lookRows = el("div", {}, Object.entries(BASE_LOOK).map(([slot, cfg]) => el("div", { class: "ward-slot" }, [el("div", { class: "ward-sub", text: cfg.label }), el("div", { class: "look-row" }, cfg.options.map((o) => el("button", { class: "swatch" + (sel.look[slot] === o.id ? " on" : ""), style: `background:${o.color}`, title: o.name, "data-slot": slot, "data-id": o.id, onclick: () => { sel.look[slot] = o.id; markLook(slot); drawPreview(); } })))])));
   const markLook = (slot) => lookRows.querySelectorAll(`.swatch[data-slot="${slot}"]`).forEach((n) => n.classList.toggle("on", n.getAttribute("data-id") === sel.look[slot]));
+
   const adjWrap = el("div", { class: "adj-wrap" });
-  const renderAdj = () => { adjWrap.replaceChildren(...sel.three.map((a, i) => el("button", { class: "adj-card" + (sel.adjIndex === i ? " on" : ""), onclick: () => { sel.adjIndex = i; renderAdj(); updateStart(); } }, [el("div", { class: "adj-word", text: "JOEY " + a.word }), el("div", { class: "adj-buff small", text: adjSummary(a) })]))); };
-  const reroll = el("button", { class: "btn ghost small", onclick: () => { sel.three = shuffle(ADJECTIVES).slice(0, 3); sel.adjIndex = null; renderAdj(); updateStart(); } }, ["🎲 reroll"]);
+  const renderAdj = () => {
+    adjWrap.replaceChildren(...sel.three.map((a, i) => {
+      const R = RARITY[a.rarity] || RARITY.common;
+      return el("button", { class: "adj-card rar-" + a.rarity + (sel.adjIndex === i ? " on" : ""), style: `--rar:${R.tint}`, onclick: () => { sel.adjIndex = i; renderAdj(); updateStart(); } }, [
+        el("div", { class: "adj-top" }, [el("div", { class: "adj-word", text: "JOEY " + a.word }), el("span", { class: "adj-rarity", style: `background:${R.tint}`, text: R.label })]),
+        el("div", { class: "adj-buff small", text: adjSummary(a) }),
+      ]);
+    }));
+  };
+  const rerollText = () => sel.rerolls > 0 ? "🎲 reroll (" + sel.rerolls + " left)" : "no rerolls left";
+  const reroll = el("button", { class: "btn ghost small", onclick: () => { if (sel.rerolls <= 0) return; sel.rerolls -= 1; sel.three = rollAdjectives(3); sel.adjIndex = null; reroll.textContent = rerollText(); if (sel.rerolls <= 0) { reroll.disabled = true; reroll.classList.add("poor"); } renderAdj(); updateStart(); } }, [rerollText()]);
+
   const startInfo = el("div", { class: "start-info muted small" });
-  const updateStart = () => { const ready = sel.specialty && sel.adjIndex != null; startBtn.disabled = !ready; startBtn.classList.toggle("poor", !ready); startInfo.textContent = ready ? ("You'll be JOEY " + sel.three[sel.adjIndex].word + " — " + SPECIALTIES[sel.specialty].name + ", " + adjSummary(sel.three[sel.adjIndex]) + ".") : "Pick a specialty and a name to start."; };
-  const startBtn = el("button", { class: "btn primary big poor", disabled: "true", onclick: () => { if (!sel.specialty || sel.adjIndex == null) return; clearInterval(previewTimer); createJoey({ specialty: sel.specialty, adjectiveWord: sel.three[sel.adjIndex].word, look: sel.look }); back.remove(); flash("Welcome, " + state.me.name + "! Stand next to furniture to earn more."); } }, ["Start as this Joey"]);
+  const updateStart = () => {
+    const ready = sel.specialty && sel.adjIndex != null && acctReady();
+    startBtn.disabled = !ready; startBtn.classList.toggle("poor", !ready);
+    startInfo.textContent = !acctReady() ? "Make an account first (step 1)." : ready ? ("You'll be JOEY " + sel.three[sel.adjIndex].word + " — " + SPECIALTIES[sel.specialty].name + ", " + adjSummary(sel.three[sel.adjIndex]) + ".") : "Pick a specialty and a name to start.";
+  };
+  const startBtn = el("button", { class: "btn primary big poor", disabled: "true", onclick: () => { if (!sel.specialty || sel.adjIndex == null || !acctReady()) return; clearInterval(previewTimer); createJoey({ specialty: sel.specialty, adjectiveWord: sel.three[sel.adjIndex].word, look: sel.look }); back.remove(); flash("Welcome, " + state.me.name + "! Stand next to furniture to earn more."); } }, ["Start as this Joey"]);
+
   const back = el("div", { class: "modal-back" }, [el("div", { class: "creator" }, [
     el("h2", { text: "BUILD YOUR JOEY" }),
     el("div", { class: "creator-body" }, [
       el("div", { class: "creator-left" }, [preview, el("div", { class: "prev-cap muted small", text: "big nose, proud 'stache" })]),
-      el("div", { class: "creator-right" }, [el("div", { class: "sect-label", text: "1 · Specialty" }), specRow, el("div", { class: "sect-label", text: "2 · Your name & buff" }), el("div", { class: "adj-head" }, [el("span", { class: "muted small", text: "Pick one. It's permanent." }), reroll]), adjWrap, el("div", { class: "sect-label", text: "3 · Look" }), lookRows]),
+      el("div", { class: "creator-right" }, [
+        el("div", { class: "sect-label", text: "1 · Account" }), acctRow,
+        el("div", { class: "sect-label", text: "2 · Specialty" }), specRow,
+        el("div", { class: "sect-label", text: "3 · Your name & traits" }), el("div", { class: "adj-head" }, [el("span", { class: "muted small", text: "Pick one. It's permanent. Rarer names carry stronger traits." }), reroll]), adjWrap,
+        el("div", { class: "sect-label", text: "4 · Look" }), lookRows,
+      ]),
     ]),
     startInfo, startBtn,
   ])]);
-  document.body.appendChild(back); renderAdj(); updateStart(); drawPreview();
+  document.body.appendChild(back); renderAcct(); renderAdj(); updateStart(); drawPreview();
 }

@@ -8,6 +8,7 @@ import {
   FURNITURE, MODS, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isNearFootprint,
   footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt, hasSurface,
   walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
+  attackRangeFor, interactRange, buildRange, sizeMult,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
@@ -157,7 +158,7 @@ function doAttack() {
   const cands = [];
   for (const [id, r] of renderPeers) cands.push({ kind: "peer", id, x: r.x, y: r.y, name: r.name });
   for (const n of activeBots()) cands.push({ kind: "bot", ref: n, x: n.x, y: n.y, name: n.name });
-  let best = null, bd = TUNING.attackRange;
+  let best = null, bd = attackRangeFor(state.me);   // "Melee range" trait
   for (const c of cands) { const d = Math.hypot(c.x - state.me.pos.x, c.y - state.me.pos.y); if (d <= bd) { bd = d; best = c; } }
   if (!best) return onTileMessage("Nothing in knife reach.");
   const def = useWeapon();   // breaks whether or not it kills
@@ -233,7 +234,7 @@ function updatePeers(dt) {
     r.x = lerp(r.x, p.x ?? r.x, clamp(dt * 8, 0, 1));
     r.y = lerp(r.y, p.y ?? r.y, clamp(dt * 8, 0, 1));
     r.moving = Math.hypot((p.x ?? 0) - r.x, (p.y ?? 0) - r.y) > 0.02;
-    r.name = p.name; r.look = p.look; r.worn = p.worn;
+    r.name = p.name; r.look = p.look; r.worn = p.worn; r.size = p.size;
   }
   for (const id of renderPeers.keys()) if (!live.has(id)) renderPeers.delete(id);
 }
@@ -321,7 +322,7 @@ function draw(t) {
     }
   }
 
-  const inUse = state.me.created ? new Set(usingKeys(state.me.pos, s)) : new Set();
+  const inUse = state.me.created ? new Set(usingKeys(state.me.pos, s, interactRange(state.me))) : new Set();
 
   const items = [];
   for (const [key, f] of Object.entries(s.furniture)) {
@@ -471,7 +472,7 @@ function drawSite(ax, ay, site) {
   const def = FURNITURE[site.type], tint = TAG_TINT[def.tag] || "#9aa3af";
   const cells = footprintCells(site.type, ax, ay, site.rot || 0), z = def.h * 0.5 * camera.zoom;
   const prog = Math.min(1, siteProgress(site) / site.work);
-  const building = state.me.created && isNearFootprint(state.me.pos, site.type, ax, ay, TUNING.adjacencyRange, site.rot || 0);
+  const building = state.me.created && isNearFootprint(state.me.pos, site.type, ax, ay, buildRange(state.me), site.rot || 0);
   drawCellsPrism(cells, tint, z, { alpha: 0.5 });
   ctx.strokeStyle = building ? "rgba(70,200,130,0.95)" : "rgba(90,100,120,0.7)";
   ctx.setLineDash([4, 3]); ctx.lineWidth = 2 * camera.zoom;
@@ -487,10 +488,10 @@ function drawSite(ax, ay, site) {
 
 function drawMe(t) {
   const p = project(state.me.pos.x, state.me.pos.y, canvas);
-  const using = state.me.created && usingKeys(state.me.pos, state.shared).length > 0;
+  const using = state.me.created && usingKeys(state.me.pos, state.shared, interactRange(state.me)).length > 0;
   drawJoey(ctx, p.x, p.y, {
     look: state.me.look, worn: wornArt(state.me),
-    scale: camera.zoom, walking: state.me.moving, t, using,
+    scale: camera.zoom * (state.me.created ? sizeMult(state.me) : 1), walking: state.me.moving, t, using,
     name: state.me.created ? state.me.name : "new Joey",
   });
 }
@@ -498,7 +499,7 @@ function drawMe(t) {
 function drawPeer(r, t, isNpc = false) {
   const p = project(r.x, r.y, canvas);
   if (isNpc) ctx.globalAlpha = 0.95;
-  drawJoey(ctx, p.x, p.y, { look: r.look, worn: r.worn || {}, scale: camera.zoom, walking: r.moving, t, name: r.name || "JOEY" });
+  drawJoey(ctx, p.x, p.y, { look: r.look, worn: r.worn || {}, scale: camera.zoom * (r.size || 1), walking: r.moving, t, name: r.name || "JOEY" });
   ctx.globalAlpha = 1;
   if (r.id === CHARLIE_ID) {
     ctx.font = `${15 * camera.zoom}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -512,6 +513,6 @@ export function myPresence() {
     name: state.me.created ? state.me.name : "new Joey",
     look: state.me.look, worn: wornArt(state.me),
     x: state.me.pos.x, y: state.me.pos.y, moving: !!state.me.moving,
-    specialty: state.me.specialty,
+    specialty: state.me.specialty, size: state.me.created ? sizeMult(state.me) : 1,
   };
 }
