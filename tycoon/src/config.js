@@ -15,11 +15,12 @@ export const SUPABASE = {
 };
 
 // Everyone using the same room shares one office, furniture, and team pot.
-export const ROOM = "joetime-01";
+// Bumped to -02 to abandon the test-scarred shared room and start fresh.
+export const ROOM = "joetime-02";
 
 // Per-browser save key. Bump the suffix to force a clean slate on a breaking
-// change to the personal save shape.
-export const ME_KEY = "joetime:me:v2";
+// change to the personal save shape (or to wipe test junk). v3 = post-combat reset.
+export const ME_KEY = "joetime:me:v3";
 
 // Economy + world tunables. Pure numbers, safe to tweak.
 export const TUNING = {
@@ -32,10 +33,16 @@ export const TUNING = {
   startCredits: 25,
   offlineCapHours: 8,         // idle income (base + gear only) accrues while away
 
-  startFloor: { w: 9, h: 9 },
-  maxFloor: 26,
-  floorExpandCost: 400,
-  floorExpandGrowth: 2.3,
+  startFloor: { w: 9, h: 9 },   // the main room's size
+  rooms: { size: 5, gap: 3 },   // side-room interior size + hallway length
+  roomCost: 800,                // first side room
+  roomGrowth: 1.55,             // each subsequent room costs this much more
+  maxRooms: 16,
+
+  // Doors + password locks (gated behind research). Locks are expensive.
+  doorTier: 3,
+  doorCost: 500,
+  lockCost: 6000,
 
   walkSpeed: 3.2,             // tiles/sec, before any speed buff
 
@@ -57,6 +64,18 @@ export const TUNING = {
 
   heartbeatMs: 1000,
   peerTimeoutMs: 4000,
+
+  // Combat + Garlic Charlie
+  attackRange: 1.55,                    // must be this close (diagonal-adjacent) to strike
+  charlieDonatePerSec: 0.25,            // Charlie funnels this into the team pot (his "10%")
+  charlieRespawnMs: 60 * 60 * 1000,     // he comes back once an hour
+  charlieBuyMinMs: 6 * 60 * 1000,       // random, far-apart furniture buys
+  charlieBuyMaxMs: 18 * 60 * 1000,
+  charlieMaxFurniture: 40,              // stop Charlie buying once the office is this full
+  charlieBountyMult: 60,                // coins the killer takes = this × current tier
+  killSoulMult: 0.1,                    // each kill nudges your soul channeling (sin fuels it)
 };
+
+export const CHARLIE_ID = "garlic-charlie";
 
 export const ECON_TICK_MS = 250;

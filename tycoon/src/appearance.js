@@ -74,6 +74,25 @@ export function drawJoey(ctx, cx, cy, { look, worn = {}, scale = 1, walking = fa
 
   if (worn.hands) drawHands(ctx, worn.hands, S);
 
+  // shield strapped to the left arm (any equipped shield-art gear)
+  const shieldSlot = ["torso", "head", "legs", "feet", "hands", "eyes", "nose"].map((s) => worn[s]).find((wsl) => wsl && wsl.art === "shield");
+  if (shieldSlot) {
+    ctx.fillStyle = shieldSlot.color || "#54648a";
+    ctx.beginPath();
+    ctx.moveTo(-11.5 * S, -8 * S); ctx.lineTo(-6 * S, -10 * S); ctx.lineTo(-6 * S, 1 * S);
+    ctx.quadraticCurveTo(-8.5 * S, 4 * S, -11.5 * S, 1 * S); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = shade(shieldSlot.color || "#54648a", -30); ctx.lineWidth = 1.2 * S; ctx.stroke();
+    ctx.strokeStyle = shade(shieldSlot.color || "#54648a", 40); ctx.lineWidth = 1 * S;
+    ctx.beginPath(); ctx.moveTo(-8.7 * S, -8 * S); ctx.lineTo(-8.7 * S, 1.5 * S); ctx.stroke();
+  }
+  // weapon in the right hand
+  if (worn.weapon) {
+    ctx.strokeStyle = "#5a3b22"; ctx.lineWidth = 2.4 * S; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(8 * S, 1 * S); ctx.lineTo(9.5 * S, -2 * S); ctx.stroke();
+    ctx.strokeStyle = worn.weapon.color || "#b6bcc6"; ctx.lineWidth = 2.6 * S;
+    ctx.beginPath(); ctx.moveTo(9.5 * S, -2 * S); ctx.lineTo(13 * S, -10 * S); ctx.stroke();
+  }
+
   // head
   ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(0, -21 * S, 8.4 * S, 0, 7); ctx.fill();
   if (lk.stache !== "m5") { ctx.fillStyle = stache; ctx.beginPath(); ctx.arc(0, -23.5 * S, 8.6 * S, Math.PI * 1.03, Math.PI * 1.97); ctx.fill(); ctx.fillRect(-8.6 * S, -24 * S, 2.6 * S, 4 * S); ctx.fillRect(6 * S, -24 * S, 2.6 * S, 4 * S); }

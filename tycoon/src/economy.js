@@ -245,6 +245,19 @@ export const ITEMS = {
   candlehat: { name: "Candle Hat", slot: "head", tier: 3, soulBonus: 0.4, shape: "triL", glyph: "🕯️", color: "#c98a2b", costUnit: 1.2 },
   ouija: { name: "Ouija Pendant", slot: "nose", tier: 4, soulBonus: 0.6, shape: "dot", glyph: "🔯", color: "#5a3fb8", costUnit: 1.4 },
   ritualrobes: { name: "Ritual Robes", slot: "torso", tier: 6, soulBonus: 1.2, shape: "square", glyph: "👘", color: "#3b2b5b", costUnit: 1.8 },
+  // ---- COMBAT: weapons (hand) — attacking needs one; it breaks after `uses` ---
+  knife: { name: "Knife", slot: "weapon", tier: 1, weapon: true, uses: 1, shape: "domino", art: "weapon", glyph: "🔪", color: "#b6bcc6", costUnit: 0.8 },
+  machete: { name: "Machete", slot: "weapon", tier: 4, weapon: true, uses: 3, shape: "domino", art: "weapon", glyph: "🗡️", color: "#8a939f", costUnit: 1.4 },
+  katana: { name: "Katana", slot: "weapon", tier: 7, weapon: true, uses: 8, shape: "line3", art: "weapon", glyph: "⚔️", color: "#dcdce4", costUnit: 2.1 },
+  // ---- COMBAT: shields — each absorbs one lethal hit; the lowest-value one breaks
+  // first. Tier 1 is torso; every higher tier opens a shield for another slot.
+  shield_torso: { name: "Riot Shield", slot: "torso", tier: 1, shield: true, shape: "square", art: "shield", glyph: "🛡️", color: "#54648a", costUnit: 0.9 },
+  shield_head: { name: "Helm Shield", slot: "head", tier: 2, shield: true, shape: "domino", art: "shield", glyph: "🛡️", color: "#54648a", costUnit: 1.0 },
+  shield_legs: { name: "Plate Greaves", slot: "legs", tier: 3, shield: true, shape: "domino", art: "shield", glyph: "🛡️", color: "#54648a", costUnit: 1.1 },
+  shield_feet: { name: "Boot Plates", slot: "feet", tier: 4, shield: true, shape: "domino", art: "shield", glyph: "🛡️", color: "#54648a", costUnit: 1.2 },
+  shield_hands: { name: "Bracers", slot: "hands", tier: 5, shield: true, shape: "domino", art: "shield", glyph: "🛡️", color: "#54648a", costUnit: 1.3 },
+  shield_eyes: { name: "Visor Shield", slot: "eyes", tier: 6, shield: true, shape: "domino", art: "shield", glyph: "🛡️", color: "#54648a", costUnit: 1.4 },
+  shield_nose: { name: "Face Guard", slot: "nose", tier: 7, shield: true, shape: "dot", art: "shield", glyph: "🛡️", color: "#54648a", costUnit: 1.5 },
   // special: black mark (combat patch). Immovable.
   blackmark: { name: "Black Mark", slot: null, tier: 1, art: "blackmark", glyph: "🖤", color: "#1c1c22", shape: "dot", immovable: true, noSell: true, noEquip: true },
 };
@@ -289,6 +302,15 @@ export function bagGrid(me) {
   const def = inst && ITEMS[inst.type];
   return (def && def.grid) ? def.grid : { w: 2, h: 2 };
 }
+// Black marks (from kills) eat bag cells from the back. They can exceed the
+// current bag size (overflow isn't shown but still counts), so a bigger bag just
+// reveals more of your sins — you can't "bag" your way out of them.
+export function blackMarkSlots(me) { return Math.max(0, (me && me.kills || 0) - 1); }
+export function blackMarkCells(me) {
+  const g = bagGrid(me), total = g.w * g.h, n = Math.min(total, blackMarkSlots(me)), set = new Set();
+  for (let i = 0; i < n; i++) { const idx = total - 1 - i; set.add((idx % g.w) + "," + Math.floor(idx / g.w)); }
+  return set;
+}
 export function bagOccupied(me, ignoreUid = null) {
   const occ = new Map();
   for (const [uid, p] of Object.entries((me.bag && me.bag.placements) || {})) {
@@ -296,6 +318,7 @@ export function bagOccupied(me, ignoreUid = null) {
     const inst = me.items[uid]; if (!inst) continue;
     for (const [dx, dy] of itemCells(inst.type, p.rot || 0)) occ.set(`${p.x + dx},${p.y + dy}`, uid);
   }
+  for (const k of blackMarkCells(me)) if (!occ.has(k)) occ.set(k, "blackmark");
   return occ;
 }
 export function fitsAt(me, itemType, x, y, rot, ignoreUid = null) {
@@ -314,6 +337,26 @@ export function firstFit(me, itemType, ignoreUid = null) {
   return null;
 }
 export function bagFreeCells(me) { const g = bagGrid(me); return g.w * g.h - bagOccupied(me).size; }
+
+// ---- combat helpers -------------------------------------------------------
+export function equippedWeapon(me) {
+  const uid = me.equipment && me.equipment.weapon, inst = uid && me.items[uid], def = inst && ITEMS[inst.type];
+  return def && def.weapon ? { uid, inst, def } : null;
+}
+export function equippedShields(me) {
+  const out = [];
+  for (const slot of ITEM_SLOTS) {
+    const uid = me.equipment && me.equipment[slot], inst = uid && me.items[uid], def = inst && ITEMS[inst.type];
+    if (def && def.shield) out.push({ slot, uid, def, value: tierPower(def.tier) });
+  }
+  return out;
+}
+export function lowestShield(me) {
+  const s = equippedShields(me);
+  if (!s.length) return null;
+  return s.reduce((a, b) => (b.value < a.value ? b : a));
+}
+export function shieldCount(me) { return equippedShields(me).length; }
 
 // ---- income + effects -----------------------------------------------------
 
@@ -381,13 +424,65 @@ export function isUsing(pos, gx, gy) {
   return Math.max(Math.abs(px - gx), Math.abs(py - gy)) <= TUNING.adjacencyRange;
 }
 
-// ---- floor ----------------------------------------------------------------
+// ---- rooms + hallways + doors ---------------------------------------------
+// The floor is a set of rectangular rooms joined by 1-wide hallways. rooms[0] is
+// the main room. Walkable = union of room + hall cells; everything else is void.
 
-export function expandCost(shared) {
-  const steps = Math.max(0, shared.floor.w - TUNING.startFloor.w);
-  return Math.ceil(TUNING.floorExpandCost * Math.pow(TUNING.floorExpandGrowth, steps));
+export function roomCost(shared) {
+  const n = Math.max(0, (shared.rooms ? shared.rooms.length : 1) - 1);
+  return Math.ceil(TUNING.roomCost * Math.pow(TUNING.roomGrowth, n));
 }
-export function canExpand(shared) { return shared.floor.w < TUNING.maxFloor; }
+export function canAddRoom(shared) { return (shared.rooms ? shared.rooms.length : 1) < TUNING.maxRooms; }
+
+export function walkableSet(shared) {
+  const s = new Set();
+  for (const r of (shared.rooms || [])) for (let i = 0; i < r.w; i++) for (let j = 0; j < r.h; j++) s.add((r.x + i) + "," + (r.y + j));
+  for (const h of (shared.halls || [])) for (let i = 0; i < h.w; i++) for (let j = 0; j < h.h; j++) s.add((h.x + i) + "," + (h.y + j));
+  return s;
+}
+export function isWalkable(shared, gx, gy) {
+  for (const r of (shared.rooms || [])) if (gx >= r.x && gx < r.x + r.w && gy >= r.y && gy < r.y + r.h) return true;
+  for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
+  return false;
+}
+export function inHall(shared, gx, gy) {
+  for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
+  return false;
+}
+
+// The next side room + connecting hallway to add. Rooms grow along 4 arms
+// (E, S, W, N) so every hallway is a straight 1-wide corridor.
+export function nextRoom(shared) {
+  const RS = TUNING.rooms.size, GAP = TUNING.rooms.gap, step = RS + GAP;
+  const main = shared.rooms[0];
+  const midX = main.x + Math.floor(main.w / 2), midY = main.y + Math.floor(main.h / 2);
+  const n = (shared.rooms.length - 1), arm = n % 4, k = Math.floor(n / 4) + 1;
+  const half = Math.floor(RS / 2);
+  let room, hall;
+  if (arm === 0) { const rx = main.x + main.w + GAP + (k - 1) * step; room = { x: rx, y: midY - half, w: RS, h: RS }; hall = { x: rx - GAP, y: midY, w: GAP, h: 1 }; }
+  else if (arm === 1) { const ry = main.y + main.h + GAP + (k - 1) * step; room = { x: midX - half, y: ry, w: RS, h: RS }; hall = { x: midX, y: ry - GAP, w: 1, h: GAP }; }
+  else if (arm === 2) { const rx = main.x - GAP - (k - 1) * step - RS; room = { x: rx, y: midY - half, w: RS, h: RS }; hall = { x: rx + RS, y: midY, w: GAP, h: 1 }; }
+  else { const ry = main.y - GAP - (k - 1) * step - RS; room = { x: midX - half, y: ry, w: RS, h: RS }; hall = { x: midX, y: ry + RS, w: 1, h: GAP }; }
+  return { room, hall };
+}
+
+// Bounding box of all rooms + halls (can be negative), used for grid bounds.
+export function floorBounds(shared) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const eat = (r) => { minX = Math.min(minX, r.x); minY = Math.min(minY, r.y); maxX = Math.max(maxX, r.x + r.w - 1); maxY = Math.max(maxY, r.y + r.h - 1); };
+  for (const r of (shared.rooms || [])) eat(r);
+  for (const h of (shared.halls || [])) eat(h);
+  if (minX === Infinity) return { x: 0, y: 0, w: 9, h: 9 };
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+// Whether `me` can pass the door at `key` (owner + already-unlocked pass free).
+export function doorPassable(door, key, meId, unlocked) {
+  if (!door) return true;
+  if (!door.locked) return true;
+  if (door.by === meId) return true;
+  return !!(unlocked && unlocked.has(key));
+}
 
 // ---- BUILD + BRAIN --------------------------------------------------------
 
