@@ -17,6 +17,16 @@ per item is roughly constant across tiers; acceleration comes from stacking
 items, gear multipliers, the pot buff, and research). Original request kept
 below for reference.
 
+**Esotericism / SOUL axis — SHIPPED 2026-09-16.** Added a second, horizontal
+unlock axis. Vertical = research tier (shared). Horizontal = esotericism level
+(Mundane → Curious → Uncanny → Eldritch), gated by personal SOUL. SOUL is
+channeled by standing at Esoteric Altars (basic altar is slow by design; an
+Obsidian Obelisk is stronger), boosted by soul gear (Candle Hat, Ouija Pendant,
+Ritual Robes) and a `me.soulMult` hook the combat patch will raise via kills.
+Grounded items stay Eso 0 (research-gated only); the weird ones (Third Eye,
+Time-Dilation Watch, Neural Lace, Sentient Necktie, Infinity Briefcase, etc.)
+sit at Eso 1–3 and show a per-item soul lock inside their unlocked tier.
+
 
 Replace the current model of researching / locking **individual items**. The shop
 should instead be organized into **10 tiers**.
