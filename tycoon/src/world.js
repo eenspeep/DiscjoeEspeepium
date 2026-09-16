@@ -21,6 +21,7 @@ let buildMod = null;    // node-mod type being placed
 let buildDoor = false;  // placing a door
 let buildRot = 0;       // rotation (0..3) for furniture placement
 let enzoClickT = -9;    // last Enzo-click time, for the click pulse
+const ZMIN = 0.5, ZMAX = 2.6;   // in-game zoom range (pinch / wheel / buttons)
 let onFurnitureClick = () => {};
 let onSiteClick = () => {};
 let onDoorClick = () => {};
@@ -70,8 +71,35 @@ export function initWorld(canvasEl, hooks = {}) {
   canvas.addEventListener("click", onClick);
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
-    camera.zoom = clamp(camera.zoom * (e.deltaY > 0 ? 0.92 : 1.08), 0.55, 1.9);
+    camera.zoom = clamp(camera.zoom * (e.deltaY > 0 ? 0.92 : 1.08), ZMIN, ZMAX);
   }, { passive: false });
+
+  // touch: pinch to zoom, one-finger tap to act (walk / click furniture / Enzo)
+  let pinchBase = 0, pinchZoom = 0, tap = null;
+  const dist2 = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
+  canvas.addEventListener("touchstart", (e) => {
+    if (e.touches.length === 2) { pinchBase = dist2(e.touches); pinchZoom = camera.zoom; tap = null; }
+    else if (e.touches.length === 1) { const t = e.touches[0]; tap = { x: t.clientX, y: t.clientY, moved: false }; }
+  }, { passive: false });
+  canvas.addEventListener("touchmove", (e) => {
+    if (e.touches.length === 2 && pinchBase > 0) { e.preventDefault(); camera.zoom = clamp(pinchZoom * (dist2(e.touches) / pinchBase), ZMIN, ZMAX); }
+    else if (e.touches.length === 1 && tap) { const t = e.touches[0]; if (Math.hypot(t.clientX - tap.x, t.clientY - tap.y) > 12) tap.moved = true; }
+  }, { passive: false });
+  canvas.addEventListener("touchend", (e) => {
+    if (tap && !tap.moved && e.changedTouches.length) {
+      const t = e.changedTouches[0], r = canvas.getBoundingClientRect();
+      mouse.sx = (t.clientX - r.left) * dpr; mouse.sy = (t.clientY - r.top) * dpr; mouse.over = true;
+      const g = screenToGrid(mouse.sx, mouse.sy, canvas); mouse.gx = Math.round(g.gx); mouse.gy = Math.round(g.gy);
+      onClick();
+    }
+    tap = null; pinchBase = 0;
+  }, { passive: false });
+
+  // on-screen zoom buttons (also handy on desktop)
+  const zc = document.createElement("div"); zc.className = "zoom-ctrl";
+  const zbtn = (txt, mult) => { const b = document.createElement("button"); b.className = "zoom-btn"; b.textContent = txt; b.addEventListener("click", () => { camera.zoom = clamp(camera.zoom * mult, ZMIN, ZMAX); }); return b; };
+  zc.appendChild(zbtn("+", 1.2)); zc.appendChild(zbtn("−", 1 / 1.2));
+  document.body.appendChild(zc);
 
   requestAnimationFrame(loop);
 }

@@ -35,6 +35,7 @@ body {
   height: 100vh;
   display: block;
   cursor: pointer;
+  touch-action: none;   /* we handle pinch-zoom + tap ourselves */
 }
 
 .badge, .btn, .build-btn, h1, h2, .coin-amt { font-family: "Fredoka", "Inter", sans-serif; }
@@ -274,7 +275,25 @@ body {
 }
 
 /* ---- Joe Time additions ------------------------------------------------- */
-.stat-chips { display: flex; gap: 6px; margin-top: 6px; }
+.stat-chips { display: flex; gap: 6px; margin-top: 6px; flex-wrap: wrap; }
+
+/* ---- research / soul progress tracks ----------------------------------- */
+.hud-tracks { display: flex; flex-direction: column; gap: 5px; margin-top: 7px; }
+.track { display: inline-flex; align-items: center; gap: 7px; background: var(--card); border-radius: 999px; padding: 3px 10px 3px 8px; box-shadow: var(--shadow); font-size: 11px; font-weight: 700; width: fit-content; }
+.track-ic { font-size: 12px; }
+.track-bar { position: relative; width: 104px; height: 7px; border-radius: 999px; background: #dde1e9; overflow: hidden; }
+.track-fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; transition: width 0.35s ease; }
+.track.research .track-fill { background: linear-gradient(90deg, #3f6fb8, #5a8fd8); }
+.track.soul .track-fill { background: linear-gradient(90deg, #7a3fb8, #b06fd8); }
+.track-num { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.track.active { outline: 1.5px solid rgba(120, 90, 200, 0.4); }
+.track.active .track-fill { animation: trackpulse 1.1s ease-in-out infinite; }
+@keyframes trackpulse { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.28); } }
+
+/* ---- in-game zoom control ---------------------------------------------- */
+.zoom-ctrl { position: fixed; right: 14px; bottom: 96px; display: flex; flex-direction: column; gap: 6px; z-index: 15; }
+.zoom-btn { width: 42px; height: 42px; border: none; border-radius: 12px; background: var(--card); box-shadow: var(--shadow); font-size: 24px; font-weight: 700; color: var(--ink); cursor: pointer; line-height: 1; display: flex; align-items: center; justify-content: center; }
+.zoom-btn:active { transform: translateY(1px); }
 .schip {
   background: var(--card); border-radius: 999px; padding: 4px 9px;
   font-size: 12px; font-weight: 700; box-shadow: var(--shadow);
@@ -405,9 +424,19 @@ body {
 @media (max-width: 560px) {
   .coin-amt { font-size: 22px; }
   .build-btn { min-width: 58px; }
-  .cross-link { bottom: 88px; }
+  .cross-link { bottom: 122px; }
   .creator-body { flex-direction: column; align-items: center; }
   .adj-wrap { grid-template-columns: 1fr; }
+  /* let the HUD wrap so the top-right buttons never get cut off */
+  .hud { flex-wrap: wrap; padding: 10px 12px; gap: 8px; }
+  .hud-right { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .btn { padding: 8px 12px; font-size: 13px; }
+  .btn.ghost { width: 34px; }
+  .coin { padding: 8px 12px; }
+  .coin-amt { font-size: 20px; }
+  .track-bar { width: 84px; }
+  .zoom-ctrl { bottom: 92px; right: 10px; }
+  .zoom-btn { width: 38px; height: 38px; font-size: 22px; }
 }
 
 /* ---- BUILD/BRAIN: research, locks, build queue -------------------------- */

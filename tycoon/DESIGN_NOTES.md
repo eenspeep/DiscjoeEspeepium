@@ -4,6 +4,18 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Visible progress bars + mobile + in-game zoom — SHIPPED
+- **Research + soul progress bars** in the HUD (under the chips). `tierProgress`
+  and `esoProgress` give fill within the current tier/level; the bar shows the
+  live have/need and, when you're actually adjacent to BRAIN furniture / an
+  altar, a pulsing fill and a "+x/s" rate so you can see it move.
+- **Mobile layout**: the HUD wraps so the top-right buttons never get cut off,
+  chips wrap, buttons/coin shrink, build bar still scrolls. Verified at 390px.
+- **In-game zoom**: pinch-to-zoom + one-finger tap-to-act on touch (canvas
+  `touch-action: none`), plus on-screen +/− buttons for desktop too. Zoom range
+  widened to 0.5–2.6. Tap-to-act makes the game playable on a phone (no keyboard
+  WASD); the E/Q/R actions are still keyboard-only for now.
+
 ## 2026-09-16 — Pixel Joey sprite + Enzo statue — SHIPPED (art pending)
 Optional pixel sprites: if `tycoon/sprites/joey.png` exists, Joeys render from it
 instead of the procedural drawing, with a **palette swap** (mustache `#CC420D` →

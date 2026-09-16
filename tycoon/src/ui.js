@@ -17,6 +17,7 @@ import {
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
   furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
   currentTier, nextTier, researchTotal, siteProgress, tierPower, TIER_COUNT,
+  rpRate, soulRate, tierProgress, esoProgress,
   esoOfItem, esoOfFurniture, currentEso, nextEso, ESO_MAX, ESO_NAME,
   MODS, MOD_ORDER, modPrice, isModUnlocked,
   blackMarkCells, blackMarkSlots, TRAITS,
@@ -68,6 +69,17 @@ function soulTitle() {
   return "SOUL " + Math.floor(state.me.soul) + " · " + ne.have + "/" + ne.need + " to " + ne.name + " (channel at an esoteric altar)";
 }
 
+function progTrack(cls, icon, prog, rate, title) {
+  const pct = Math.round((prog.frac || 0) * 100);
+  const active = rate > 0.001;
+  const num = prog.max ? "MAX" : Math.floor(prog.have - prog.from) + "/" + Math.round(prog.to - prog.from) + (active ? "  +" + rate.toFixed(2) + "/s" : "");
+  return el("div", { class: "track " + cls + (active ? " active" : ""), title }, [
+    el("span", { class: "track-ic", text: icon }),
+    el("div", { class: "track-bar" }, [el("div", { class: "track-fill", style: `width:${pct}%` })]),
+    el("span", { class: "track-num", text: num }),
+  ]);
+}
+
 export function flash(msg) {
   const t = el("div", { class: "toast-item", text: msg });
   toast.appendChild(t);
@@ -100,6 +112,10 @@ function renderHud() {
         el("span", { class: "schip build", title: "BUILD", text: STATS.build.glyph + " " + me.stats.build }),
         el("span", { class: "schip research", title: researchTitle(), text: "🔬 T" + currentTier(state.shared) + "/" + TIER_COUNT }),
         el("span", { class: "schip soul", title: soulTitle(), text: "🔮 E" + currentEso(me) + "/" + ESO_MAX }),
+      ]) : null,
+      me.created ? el("div", { class: "hud-tracks" }, [
+        progTrack("research", "🔬", tierProgress(state.shared), rpRate(me, state.shared), researchTitle()),
+        progTrack("soul", "🔮", esoProgress(me), soulRate(me, state.shared), soulTitle()),
       ]) : null,
     ]),
     el("div", { class: "hud-right" }, [

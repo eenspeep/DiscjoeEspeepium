@@ -643,6 +643,13 @@ export function nextTier(shared) {
   if (t >= TIER_COUNT) return null;
   return { tier: t + 1, name: TIER_NAME[t + 1], need: RESEARCH_TIERS[t + 1], have: Math.floor(researchTotal(shared)) };
 }
+// Progress within the CURRENT research tier, for a progress bar.
+export function tierProgress(shared) {
+  const tier = currentTier(shared), have = researchTotal(shared), from = RESEARCH_TIERS[tier] || 0;
+  if (tier >= TIER_COUNT) return { tier, have, from, to: from, frac: 1, max: true };
+  const to = RESEARCH_TIERS[tier + 1];
+  return { tier, have, from, to, frac: Math.max(0, Math.min(1, (have - from) / (to - from))), max: false, next: tier + 1, name: TIER_NAME[tier + 1] };
+}
 export function tierUnlocked(tier, shared) { return tier <= currentTier(shared); }
 
 // ---- SOUL / esotericism (personal, horizontal axis) -----------------------
@@ -673,6 +680,13 @@ export function nextEso(me) {
   const e = currentEso(me);
   if (e >= ESO_MAX) return null;
   return { level: e + 1, name: ESO_NAME[e + 1], need: esoThresholds(me)[e + 1], have: Math.floor((me && me.soul) || 0) };
+}
+// Progress within the CURRENT esotericism level, for a progress bar.
+export function esoProgress(me) {
+  const th = esoThresholds(me), lvl = currentEso(me), have = (me && me.soul) || 0, from = th[lvl] || 0;
+  if (lvl >= ESO_MAX) return { lvl, have, from, to: from, frac: 1, max: true };
+  const to = th[lvl + 1];
+  return { lvl, have, from, to, frac: Math.max(0, Math.min(1, (have - from) / (to - from))), max: false, next: lvl + 1, name: ESO_NAME[lvl + 1] };
 }
 export function esoNeed(level) { return ESO_THRESHOLDS[level] || 0; }
 
