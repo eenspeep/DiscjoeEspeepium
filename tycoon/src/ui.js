@@ -12,16 +12,17 @@ import {
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
-  roomCost, canAddRoom, statScales, SPECIALTIES, ADJECTIVES, adjSummary, rollAdjectives, RARITY, STATS,
+  roomCost, canAddRoom, isProtected, statScales, SPECIALTIES, ADJECTIVES, adjSummary, rollAdjectives, RARITY, STATS,
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
   furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
   currentTier, nextTier, researchTotal, siteProgress, tierPower, TIER_COUNT,
+  rpRate, soulRate, tierProgress, esoProgress,
   esoOfItem, esoOfFurniture, currentEso, nextEso, ESO_MAX, ESO_NAME,
   MODS, MOD_ORDER, modPrice, isModUnlocked,
   blackMarkCells, blackMarkSlots, TRAITS,
 } from "./economy.js";
-import { BASE_LOOK, drawJoey, defaultLook } from "./appearance.js";
+import { LOOK_PICKERS, lookColor, drawJoey, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setSelected, unlockDoorLocal } from "./world.js";
 
 let hud, buildbar, panel, toast;
@@ -51,6 +52,7 @@ export function initUI(authApi) {
     if (state.justBlocked) { flash("🛡️ Blocked " + state.justBlocked.by + " — your " + state.justBlocked.shield + " shattered!"); state.justBlocked = null; }
     if (state.justFirstKill) { flash("⚠️ First kill — a warning. Kill again and black marks eat your bag."); state.justFirstKill = null; }
     if (state.justBlackMark) { flash("🖤 A black mark stains your soul — a bag slot is lost."); state.justBlackMark = null; }
+    if (state.justRefund) { flash("💸 +" + fmt(state.justRefund) + " refunded to you (someone sold furniture you paid for)."); state.justRefund = null; }
     if (state.justKilled) { flash("☠️ Killed by " + state.justKilled + ". Your gear dropped where you fell. Build a new Joey."); state.justKilled = null; closePanel(); ensureCreator(); }
   }, 400);
 }
@@ -65,6 +67,17 @@ function soulTitle() {
   const ne = nextEso(state.me);
   if (!ne) return "Esotericism maxed — SOUL " + Math.floor(state.me.soul);
   return "SOUL " + Math.floor(state.me.soul) + " · " + ne.have + "/" + ne.need + " to " + ne.name + " (channel at an esoteric altar)";
+}
+
+function progTrack(cls, icon, prog, rate, title) {
+  const pct = Math.round((prog.frac || 0) * 100);
+  const active = rate > 0.001;
+  const num = prog.max ? "MAX" : Math.floor(prog.have - prog.from) + "/" + Math.round(prog.to - prog.from) + (active ? "  +" + rate.toFixed(2) + "/s" : "");
+  return el("div", { class: "track " + cls + (active ? " active" : ""), title }, [
+    el("span", { class: "track-ic", text: icon }),
+    el("div", { class: "track-bar" }, [el("div", { class: "track-fill", style: `width:${pct}%` })]),
+    el("span", { class: "track-num", text: num }),
+  ]);
 }
 
 export function flash(msg) {
@@ -99,6 +112,10 @@ function renderHud() {
         el("span", { class: "schip build", title: "BUILD", text: STATS.build.glyph + " " + me.stats.build }),
         el("span", { class: "schip research", title: researchTitle(), text: "🔬 T" + currentTier(state.shared) + "/" + TIER_COUNT }),
         el("span", { class: "schip soul", title: soulTitle(), text: "🔮 E" + currentEso(me) + "/" + ESO_MAX }),
+      ]) : null,
+      me.created ? el("div", { class: "hud-tracks" }, [
+        progTrack("research", "🔬", tierProgress(state.shared), rpRate(me, state.shared), researchTitle()),
+        progTrack("soul", "🔮", esoProgress(me), soulRate(me, state.shared), soulTitle()),
       ]) : null,
     ]),
     el("div", { class: "hud-right" }, [
@@ -164,13 +181,17 @@ function renderFurniture() {
   const def = FURNITURE[f.type], sc = statScales(state.me), raw = furnitureValue(f);
   const mine = def.tag === "brain" ? raw * sc.brain : def.tag === "build" ? raw * sc.build : raw;
   const up = upgradeCost(f);
+  const [gx, gy] = openKey.split(",").map(Number);
+  const prot = isProtected(state.shared, gx, gy);
+  const iPaid = !f.paidBy || f.paidBy === state.me.id;
   panel.replaceChildren(
     panelHeader(def.glyph + " " + def.name),
     el("p", { class: "muted small", text: def.tag.toUpperCase() + " furniture. Buffs anyone standing next to it." }),
+    prot ? el("p", { class: "muted small", text: iPaid ? "🛡️ Protected room — anyone can sell this, and the refund comes back to you (you paid for it)." : "🛡️ Protected room — anyone can sell this, and the refund goes back to whoever paid for it." }) : null,
     stat("Level", String(f.level)), stat("Base value", "+" + fmt(raw) + "/s"), stat("For you (stats)", "+" + fmt(Math.round(mine * 100) / 100) + "/s"),
     el("div", { class: "panel-actions" }, [
       el("button", { class: "btn primary" + (state.me.credits >= up ? "" : " poor"), onclick: () => { const r = tryUpgradeFurniture(openKey); flash(r.ok ? def.name + " upgraded." : (r.why || "Can't upgrade.")); } }, ["Upgrade — " + fmt(up)]),
-      el("button", { class: "btn", onclick: () => { const r = trySellFurniture(openKey); flash(r.ok ? "Sold for " + fmt(r.refund) + "." : "Can't sell."); closePanel(); } }, ["Sell"]),
+      el("button", { class: "btn", onclick: () => { const r = trySellFurniture(openKey); flash(!r.ok ? (r.why || "Can't sell.") : r.toOther ? "Sold — " + fmt(r.refund) + " returned to its buyer." : "Sold for " + fmt(r.refund) + "."); if (r.ok) closePanel(); } }, ["Sell"]),
     ])
   );
 }
@@ -187,7 +208,7 @@ function renderSite() {
     panelHeader("🔨 Building: " + def.name),
     el("p", { class: "muted small", text: "Stand next to it to build. More builders finish it faster, and everyone who helps co-owns it." }),
     stat("Progress", pct + "%"), stat("Builders so far", String(builders)), stat("Work", Math.floor(siteProgress(site)) + " / " + site.work),
-    el("div", { class: "panel-actions" }, [el("button", { class: "btn", onclick: () => { const r = cancelSite(openKey); flash(r.ok ? "Build cancelled, refunded " + fmt(r.refund) + "." : "Can't cancel."); closePanel(); } }, ["Cancel build"])])
+    el("div", { class: "panel-actions" }, [el("button", { class: "btn", onclick: () => { const r = cancelSite(openKey); flash(!r.ok ? (r.why || "Can't cancel.") : r.toOther ? "Build cancelled — " + fmt(r.refund) + " returned to its buyer." : "Build cancelled, refunded " + fmt(r.refund) + "."); if (r.ok) closePanel(); } }, ["Cancel build"])])
   );
 }
 
@@ -331,11 +352,12 @@ function renderLocker() {
     }
   }
 
-  // base look
-  kids.push(el("div", { class: "ward-label", text: "Look" }));
-  for (const [slot, cfg] of Object.entries(BASE_LOOK)) {
-    kids.push(el("div", { class: "ward-slot" }, [el("div", { class: "ward-sub", text: cfg.label }), el("div", { class: "look-row" }, cfg.options.map((o) => el("button", { class: "swatch" + (me.look[slot] === o.id ? " on" : ""), style: `background:${o.color}`, title: o.name, onclick: () => setLook(slot, o.id) })))]));
-  }
+  // base look — paper-white skin, pick mustache + shirt colors
+  kids.push(el("div", { class: "ward-label", text: "Look · paper-white skin" }));
+  kids.push(el("div", { class: "pick-rows" }, LOOK_PICKERS.map(({ slot, label }) => el("label", { class: "pick-row" }, [
+    el("span", { class: "ward-sub", text: label }),
+    el("input", { type: "color", class: "color-pick", value: lookColor(me.look, slot), oninput: (e) => setLook(slot, e.target.value) }),
+  ]))));
 
   panel.replaceChildren(...kids);
 }
@@ -485,8 +507,10 @@ function openCreator() {
 
   const specRow = el("div", { class: "spec-row" }, Object.values(SPECIALTIES).map((sp) => el("button", { class: "spec-card", "data-id": sp.id, onclick: () => { sel.specialty = sp.id; markSpec(); } }, [el("div", { class: "spec-glyph", text: sp.glyph }), el("div", { class: "spec-name", text: sp.name }), el("div", { class: "spec-blurb muted small", text: sp.blurb }), el("div", { class: "spec-start small", text: "Start: 🧠 " + sp.start.brain + "  🔧 " + sp.start.build })])));
   const markSpec = () => { specRow.querySelectorAll(".spec-card").forEach((n) => n.classList.toggle("on", n.getAttribute("data-id") === sel.specialty)); updateStart(); };
-  const lookRows = el("div", {}, Object.entries(BASE_LOOK).map(([slot, cfg]) => el("div", { class: "ward-slot" }, [el("div", { class: "ward-sub", text: cfg.label }), el("div", { class: "look-row" }, cfg.options.map((o) => el("button", { class: "swatch" + (sel.look[slot] === o.id ? " on" : ""), style: `background:${o.color}`, title: o.name, "data-slot": slot, "data-id": o.id, onclick: () => { sel.look[slot] = o.id; markLook(slot); drawPreview(); } })))])));
-  const markLook = (slot) => lookRows.querySelectorAll(`.swatch[data-slot="${slot}"]`).forEach((n) => n.classList.toggle("on", n.getAttribute("data-id") === sel.look[slot]));
+  const lookRows = el("div", { class: "pick-rows" }, LOOK_PICKERS.map(({ slot, label }) => el("label", { class: "pick-row" }, [
+    el("span", { class: "ward-sub", text: label }),
+    el("input", { type: "color", class: "color-pick", value: lookColor(sel.look, slot), oninput: (e) => { sel.look[slot] = e.target.value; drawPreview(); } }),
+  ])));
 
   const adjWrap = el("div", { class: "adj-wrap" });
   const renderAdj = () => {
@@ -512,7 +536,7 @@ function openCreator() {
   const back = el("div", { class: "modal-back" }, [el("div", { class: "creator" }, [
     el("h2", { text: "BUILD YOUR JOEY" }),
     el("div", { class: "creator-body" }, [
-      el("div", { class: "creator-left" }, [preview, el("div", { class: "prev-cap muted small", text: "big nose, proud 'stache" })]),
+      el("div", { class: "creator-left" }, [preview, el("div", { class: "prev-cap muted small", text: "paper-white skin, proud 'stache" })]),
       el("div", { class: "creator-right" }, [
         el("div", { class: "sect-label", text: "1 · Account" }), acctRow,
         el("div", { class: "sect-label", text: "2 · Specialty" }), specRow,

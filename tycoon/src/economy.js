@@ -224,7 +224,23 @@ export function blockedTiles(shared) {
   const set = new Set();
   for (const [key, f] of Object.entries(shared.furniture || {})) { const [ax, ay] = key.split(",").map(Number); for (const [cx, cy] of footprintCells(f.type, ax, ay, f.rot || 0)) set.add(cx + "," + cy); }
   for (const [key, s] of Object.entries(shared.sites || {})) { const [ax, ay] = key.split(",").map(Number); for (const [cx, cy] of footprintCells(s.type, ax, ay, s.rot || 0)) set.add(cx + "," + cy); }
+  for (const [cx, cy] of enzoCells(shared)) set.add(cx + "," + cy);   // Enzo statue is solid
   return set;
+}
+
+// Enzo the Cat: an indestructible 2x2 statue anchored to the main room's centre.
+// You can't build on it or walk through it — you click it for +1c.
+export function enzoAnchor(shared) {
+  const r = (shared.rooms && shared.rooms[0]) || { x: 0, y: 0, w: 9, h: 9 };
+  return [r.x + Math.floor(r.w / 2) - 1, r.y + Math.floor(r.h / 2) - 1];
+}
+export function enzoCells(shared) {
+  const [ax, ay] = enzoAnchor(shared);
+  return [[ax, ay], [ax + 1, ay], [ax, ay + 1], [ax + 1, ay + 1]];
+}
+export function isEnzoTile(shared, gx, gy) {
+  const [ax, ay] = enzoAnchor(shared);
+  return gx >= ax && gx <= ax + 1 && gy >= ay && gy <= ay + 1;
 }
 function coversTile(type, ax, ay, rot, gx, gy) {
   for (const [cx, cy] of footprintCells(type, ax, ay, rot)) if (cx === gx && cy === gy) return true;
@@ -545,6 +561,14 @@ export function inHall(shared, gx, gy) {
   for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
   return false;
 }
+// A tile is "protected" (communal) if it sits in a room flagged protected, or in
+// any office hallway. Furniture in a protected tile can be sold by anyone, and
+// the refund goes back to whoever paid for it.
+export function isProtected(shared, gx, gy) {
+  for (const r of (shared.rooms || [])) if (r.protected && gx >= r.x && gx < r.x + r.w && gy >= r.y && gy < r.y + r.h) return true;
+  for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
+  return false;
+}
 
 // The next side room + connecting hallway to add. Rooms grow along 4 arms
 // (E, S, W, N) so every hallway is a straight 1-wide corridor.
@@ -619,6 +643,13 @@ export function nextTier(shared) {
   if (t >= TIER_COUNT) return null;
   return { tier: t + 1, name: TIER_NAME[t + 1], need: RESEARCH_TIERS[t + 1], have: Math.floor(researchTotal(shared)) };
 }
+// Progress within the CURRENT research tier, for a progress bar.
+export function tierProgress(shared) {
+  const tier = currentTier(shared), have = researchTotal(shared), from = RESEARCH_TIERS[tier] || 0;
+  if (tier >= TIER_COUNT) return { tier, have, from, to: from, frac: 1, max: true };
+  const to = RESEARCH_TIERS[tier + 1];
+  return { tier, have, from, to, frac: Math.max(0, Math.min(1, (have - from) / (to - from))), max: false, next: tier + 1, name: TIER_NAME[tier + 1] };
+}
 export function tierUnlocked(tier, shared) { return tier <= currentTier(shared); }
 
 // ---- SOUL / esotericism (personal, horizontal axis) -----------------------
@@ -649,6 +680,13 @@ export function nextEso(me) {
   const e = currentEso(me);
   if (e >= ESO_MAX) return null;
   return { level: e + 1, name: ESO_NAME[e + 1], need: esoThresholds(me)[e + 1], have: Math.floor((me && me.soul) || 0) };
+}
+// Progress within the CURRENT esotericism level, for a progress bar.
+export function esoProgress(me) {
+  const th = esoThresholds(me), lvl = currentEso(me), have = (me && me.soul) || 0, from = th[lvl] || 0;
+  if (lvl >= ESO_MAX) return { lvl, have, from, to: from, frac: 1, max: true };
+  const to = th[lvl + 1];
+  return { lvl, have, from, to, frac: Math.max(0, Math.min(1, (have - from) / (to - from))), max: false, next: lvl + 1, name: ESO_NAME[lvl + 1] };
 }
 export function esoNeed(level) { return ESO_THRESHOLDS[level] || 0; }
 

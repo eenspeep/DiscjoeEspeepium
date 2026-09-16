@@ -4,6 +4,60 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Visible progress bars + mobile + in-game zoom — SHIPPED
+- **Research + soul progress bars** in the HUD (under the chips). `tierProgress`
+  and `esoProgress` give fill within the current tier/level; the bar shows the
+  live have/need and, when you're actually adjacent to BRAIN furniture / an
+  altar, a pulsing fill and a "+x/s" rate so you can see it move.
+- **Mobile layout**: the HUD wraps so the top-right buttons never get cut off,
+  chips wrap, buttons/coin shrink, build bar still scrolls. Verified at 390px.
+- **In-game zoom**: pinch-to-zoom + one-finger tap-to-act on touch (canvas
+  `touch-action: none`), plus on-screen +/− buttons for desktop too. Zoom range
+  widened to 0.5–2.6. Tap-to-act makes the game playable on a phone (no keyboard
+  WASD); the E/Q/R actions are still keyboard-only for now.
+
+## 2026-09-16 — Pixel Joey sprite + Enzo statue — SHIPPED (art pending)
+Optional pixel sprites: if `tycoon/sprites/joey.png` exists, Joeys render from it
+instead of the procedural drawing, with a **palette swap** (mustache `#CC420D` →
+picked mustache color, shirt `#299212` → picked shirt color, cached per combo)
+and a **squash-and-stretch** as they walk. Missing file → procedural fallback,
+so nothing breaks. Node/tests are guarded (no Image/document). Tradeoff: the flat
+sprite does not draw equipped gear overlays (weapons/shields/hats) that the
+procedural Joey shows — revisit with gear sprites or glyphs if wanted.
+
+**Enzo the Cat statue:** an indestructible 2x2 object locked to the main room's
+centre (`enzoAnchor`/`enzoCells`). Its tiles are in `blockedTiles` so nobody can
+build on it or walk through it, and it can't be sold. Click it for **+1¢**
+(`tryClickEnzo`, personal wallet only, no shared write) with a little pulse and
+"+1¢" floater. Renders from `sprites/enzo.png`, or a gray-pedestal placeholder
+until that art lands. Starter furniture moved off-centre to clear it.
+
+## 2026-09-16 — Paper-white skin + color-picker look — SHIPPED
+Every Joey now has fixed paper-white skin (`PAPER_WHITE`), with a faint head
+outline so it reads on light or transparent backgrounds. Skin is no longer
+selectable. The only look choices are **mustache** and **shirt**, now driven by
+open `<input type="color">` pickers (any hex) instead of fixed swatches, in both
+the creator and the Locker. The `look` model changed from swatch ids to stored
+hex colors; `normalizeLook` coerces old/invalid saves to defaults. The creator
+preview sits on a checkerboard to show the transparent background (the Joey is
+painted with no white box behind it). `lookFromSeed` (Charlie/ambient) returns
+hex colors from a small palette.
+
+## 2026-09-16 — Protected rooms + refund-to-buyer — SHIPPED
+Every office room (main + each added room) carries a `protected: true` flag, and
+hallways count as protected too. In a protected tile, ANYONE can sell a piece of
+furniture (not just its builders), and the refund goes back to whoever **paid**
+for it, not the seller. Non-protected tiles (future private rooms behind locked
+doors) keep the old builder-only sell rule with the refund going to the seller.
+
+Mechanics: furniture now records `paidBy` (the player who spent the credits to
+start its build site). On a cross-owner sale the refund is parked in a shared
+`owed` ledger keyed by player id, and that player's own client claims it on its
+next tick (so it survives them being offline). Refund for someone else uses the
+base 40% rate, a self-sale still uses the seller's refund trait. Refunds owed to
+Garlic Charlie or to unknown payers fall back to the seller so no gold is lost.
+`cancelSite` follows the same routing. Verified headless (19 assertions).
+
 ## 2026-09-16 — Account gate + trait-rich adjectives — SHIPPED
 Building a Joey now requires an account (when Supabase auth is configured — the
 creator's step 1 gates "Start" on login; local builds without Supabase bypass
