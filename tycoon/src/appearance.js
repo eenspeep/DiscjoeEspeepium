@@ -120,15 +120,16 @@ export function drawJoey(ctx, cx, cy, { look, worn = {}, scale = 1, walking = fa
 // back to the procedural Joey above. enzo.png works the same way for the statue.
 // Node/tests have no Image/document, so guard and no-op there.
 const HAS_CANVAS = typeof Image !== "undefined" && typeof document !== "undefined";
-function loadSprite(src) {
+function loadSprite(src, fallback) {
   if (!HAS_CANVAS) return { img: null, ready: () => false };
   const img = new Image();
-  img.onload = () => {}; img.onerror = () => {};
+  let tried = false;
+  img.onerror = () => { if (fallback && !tried) { tried = true; img.src = fallback; } };
   img.src = src;
   return { img, ready: () => !!img.naturalWidth };
 }
-const JOEY_SPR = loadSprite("sprites/joey.png");
-const ENZO_SPR = loadSprite("sprites/enzo.png");
+const JOEY_SPR = loadSprite("sprites/joey.png", "sprites/joey");
+const ENZO_SPR = loadSprite("sprites/enzo.png", "sprites/enzo");
 export function joeySpriteReady() { return JOEY_SPR.ready(); }
 export function enzoImage() { return ENZO_SPR.ready() ? ENZO_SPR.img : null; }
 

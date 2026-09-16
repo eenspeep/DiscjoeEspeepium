@@ -125,8 +125,13 @@ function onClick() {
   const sKey = siteAnchorAt(state.shared, gx, gy);
   const doorKey = gx + "," + gy;
   if (isEnzoTile(state.shared, gx, gy)) {
-    const r = tryClickEnzo();
-    if (r.ok) { enzoClickT = now() / 1000; onTileMessage("🐱 Enzo blesses you (+1¢)"); }
+    if (adjacentToEnzo(state.me.pos)) {
+      const r = tryClickEnzo();
+      if (r.ok) { enzoClickT = now() / 1000; onTileMessage("🐱 Enzo blesses you (+1¢)"); }
+    } else {
+      const spot = nearestEnzoApproach();   // too far — walk up to it instead of coining
+      if (spot) target = spot;
+    }
     return;
   }
   if (buildDoor) {
@@ -205,6 +210,24 @@ function doAttack() {
     if (sendMsg) sendMsg({ type: "attack", to: best.id, from: state.me.id, name: state.me.created ? state.me.name : "someone" });
     onTileMessage("You lunged at " + (best.name || "them") + " — your " + wname + " broke.");
   }
+}
+
+function adjacentToEnzo(pos) {
+  const px = Math.round(pos.x), py = Math.round(pos.y);
+  for (const [ex, ey] of enzoCells(state.shared)) if (Math.max(Math.abs(px - ex), Math.abs(py - ey)) <= 1) return true;
+  return false;
+}
+function nearestEnzoApproach() {
+  const s = state.shared, cells = enzoCells(s), cellSet = new Set(cells.map((c) => c[0] + "," + c[1]));
+  const blocked = blockedTiles(s), doors = s.doors || {}, ents = entityTileSet();
+  let best = null, bd = Infinity;
+  for (const [ex, ey] of cells) for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+    const x = ex + dx, y = ey + dy, k = x + "," + y;
+    if (cellSet.has(k) || !isWalkable(s, x, y) || blocked.has(k) || doors[k] || ents.has(k)) continue;
+    const d = Math.hypot(x - state.me.pos.x, y - state.me.pos.y);
+    if (d < bd) { bd = d; best = { x, y }; }
+  }
+  return best;
 }
 
 // Received a push (from another player) — move me.

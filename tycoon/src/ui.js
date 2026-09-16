@@ -22,7 +22,7 @@ import {
   MODS, MOD_ORDER, modPrice, isModUnlocked,
   blackMarkCells, blackMarkSlots, TRAITS,
 } from "./economy.js";
-import { LOOK_PICKERS, lookColor, drawJoey, defaultLook } from "./appearance.js";
+import { LOOK_PICKERS, lookColor, drawJoey, drawJoeySprite, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setSelected, unlockDoorLocal } from "./world.js";
 
 let hud, buildbar, panel, toast;
@@ -490,7 +490,11 @@ function openCreator() {
   const sel = { specialty: null, look: defaultLook(), three: rollAdjectives(3), adjIndex: null, rerolls: REROLL_MAX };
   const acctReady = () => !auth.enabled || !!state.account;
   const preview = el("canvas", { class: "joey-preview", width: "160", height: "190" });
-  const drawPreview = () => { const c = preview.getContext("2d"); c.clearRect(0, 0, 160, 190); drawJoey(c, 80, 150, { look: sel.look, worn: {}, scale: 3.2, t: performance.now() / 1000 }); };
+  const drawPreview = () => {
+    const c = preview.getContext("2d"); c.clearRect(0, 0, 160, 190);
+    const o = { look: sel.look, scale: 3.2, walking: false, t: performance.now() / 1000 };
+    if (!drawJoeySprite(c, 80, 150, o)) drawJoey(c, 80, 150, { ...o, worn: {} });
+  };
   const previewTimer = setInterval(drawPreview, 60);
 
   // step 1 — account gate
@@ -501,7 +505,10 @@ function openCreator() {
     if (state.account) acctRow.appendChild(el("span", { class: "small", text: "☁️ Signed in as " + state.account.username + " — you're good to go." }));
     else {
       acctRow.appendChild(el("span", { class: "small", text: "An account is required to build a Joey." }));
-      acctRow.appendChild(el("button", { class: "btn small primary", onclick: () => openLogin(() => { renderAcct(); updateStart(); }, true) }, ["Log in / Sign up"]));
+      acctRow.appendChild(el("button", { class: "btn small primary", onclick: () => openLogin(() => {
+        if (state.me.created) { clearInterval(previewTimer); back.remove(); flash("Welcome back, " + state.me.name + "!"); }
+        else { renderAcct(); updateStart(); }
+      }, true) }, ["Log in / Sign up"]));
     }
   };
 
