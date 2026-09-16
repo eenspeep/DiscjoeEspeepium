@@ -484,18 +484,14 @@ export function shieldCount(me) { return equippedShields(me).length; }
 
 // ---- pet rat (leash) ------------------------------------------------------
 // A leash in the weapon slot lets you recruit one tired rat. The rat rides in
-// me.pet = { since }. It fades after petMs, boosts soul channeling, and eats
-// one hit before your shields.
+// me.pet and stays as long as the leash is in hand (put the leash away or swap
+// to a weapon and the rat wanders off). It boosts soul channeling and eats one
+// hit before your shields.
 export function hasLeash(me) {
   const uid = me && me.equipment && me.equipment.weapon, inst = uid && me.items[uid], def = inst && ITEMS[inst.type];
   return !!(def && def.leash);
 }
-export function petActive(me) {
-  return !!(me && me.pet && (Date.now() - me.pet.since) < TUNING.petMs);
-}
-export function petMsLeft(me) {
-  return petActive(me) ? Math.max(0, TUNING.petMs - (Date.now() - me.pet.since)) : 0;
-}
+export function petActive(me) { return !!(me && me.pet && hasLeash(me)); }
 export function petSoulMult(me) { return petActive(me) ? TUNING.petSoulMult : 1; }
 
 // ---- income + effects -----------------------------------------------------

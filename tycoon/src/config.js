@@ -86,7 +86,6 @@ export const TUNING = {
   ratCoinMin: 1, ratCoinMax: 1000,      // coins a rat drops to its killer
   kingGuard: 5,                         // hits to kill the Rat King
   kingCoinMin: 800, kingCoinMax: 6000,  // coins the Rat King drops
-  petMs: 60 * 60 * 1000,                // a leashed rat is your buddy for up to an hour
   petSoulMult: 1.2,                     // a rat buddy multiplies your soul channeling
 };
 

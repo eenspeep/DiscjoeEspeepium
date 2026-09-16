@@ -237,7 +237,6 @@ export function tickEconomy() {
       buildTick(dt);
     }
     me.lastSeen = t;
-    if (me.pet && !petActive(me)) { me.pet = null; state.justPetGone = true; state.meDirty = true; }
     claimOwed();
   }
   potTick(t);

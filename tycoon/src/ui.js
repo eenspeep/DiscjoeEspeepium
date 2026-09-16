@@ -22,7 +22,7 @@ import {
   esoOfItem, esoOfFurniture, currentEso, nextEso, ESO_MAX, ESO_NAME,
   MODS, MOD_ORDER, modPrice, isModUnlocked,
   blackMarkCells, blackMarkSlots, TRAITS, repairCost,
-  petActive, petMsLeft,
+  petActive,
 } from "./economy.js";
 import { LOOK_PICKERS, lookColor, drawJoey, drawJoeySprite, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setSelected, unlockDoorLocal } from "./world.js";
@@ -60,7 +60,6 @@ export function initUI(authApi) {
     if (state.justMonsterBlock) { flash("🛡️ " + state.justMonsterBlock.by + " broke " + state.justMonsterBlock.n + " of your shields!"); state.justMonsterBlock = null; }
     if (state.justPetGot) { flash("🐀 You leashed a rat buddy! x1.2 soul, and it eats one hit for you."); state.justPetGot = null; }
     if (state.justPetHit) { flash("🐀💥 Your rat buddy took a hit from " + state.justPetHit.by + " and scurried off."); state.justPetHit = null; }
-    if (state.justPetGone) { flash("🐀 Your rat buddy's hour is up — it wandered back to the walls."); state.justPetGone = null; }
     if (state.justKilled) { flash("☠️ Killed by " + state.justKilled + ". Your gear dropped where you fell. Build a new Joey."); state.justKilled = null; closePanel(); ensureCreator(); }
   }, 400);
 }
@@ -75,11 +74,6 @@ function soulTitle() {
   const ne = nextEso(state.me);
   if (!ne) return "Esotericism maxed — SOUL " + Math.floor(state.me.soul);
   return "SOUL " + Math.floor(state.me.soul) + " · " + ne.have + "/" + ne.need + " to " + ne.name + " (channel at an esoteric altar)";
-}
-
-function petClock(me) {
-  const ms = petMsLeft(me), m = Math.floor(ms / 60000), s = Math.floor((ms % 60000) / 1000);
-  return m + ":" + String(s).padStart(2, "0");
 }
 
 function progTrack(cls, icon, prog, rate, title) {
@@ -126,7 +120,7 @@ function renderHud() {
         el("span", { class: "schip build", title: "BUILD", text: STATS.build.glyph + " " + me.stats.build }),
         el("span", { class: "schip research", title: researchTitle(), text: "🔬 T" + currentTier(state.shared) + "/" + TIER_COUNT }),
         el("span", { class: "schip soul", title: soulTitle(), text: "🔮 E" + currentEso(me) + "/" + ESO_MAX }),
-        petActive(me) ? el("span", { class: "schip pet", title: "Rat buddy: x1.2 soul + eats one hit", text: "🐀 " + petClock(me) }) : null,
+        petActive(me) ? el("span", { class: "schip pet", title: "Rat buddy: x1.2 soul + eats one hit (stays while the leash is in hand)", text: "🐀 buddy" }) : null,
       ]) : null,
       me.created ? el("div", { class: "hud-tracks" }, [
         progTrack("research", "🔬", tierProgress(state.shared), rpRate(me, state.shared), researchTitle()),
