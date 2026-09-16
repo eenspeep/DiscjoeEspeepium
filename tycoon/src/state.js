@@ -17,6 +17,7 @@ import {
   footprintCells, blockedTiles, furnitureAnchorAt, hasSurface, isModUnlocked, modPrice,
   equippedWeapon, lowestShield, equippedShields, blackMarkCells,
   buildRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal, withinReach, repairCost,
+  hasLeash, petActive,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -88,6 +89,7 @@ function healMe(me) {
   if (typeof me.soul !== "number") me.soul = 0;
   if (typeof me.soulMult !== "number") me.soulMult = 1; // raised by kills
   if (typeof me.kills !== "number") me.kills = 0;       // drives black marks
+  if (me.pet && typeof me.pet.since !== "number") me.pet = null; // leashed rat buddy
   if (!me.traits || typeof me.traits !== "object") me.traits = {};
   healInventory(me);
   return me;
@@ -235,6 +237,7 @@ export function tickEconomy() {
       buildTick(dt);
     }
     me.lastSeen = t;
+    if (me.pet && !petActive(me)) { me.pet = null; state.justPetGone = true; state.meDirty = true; }
     claimOwed();
   }
   potTick(t);
@@ -514,6 +517,12 @@ function dropAllItems(me, key) {
 export function receiveAttack(fromName) {
   const me = state.me;
   if (!me.created) return { ignore: true };
+  if (petActive(me)) {                    // your rat buddy jumps in front and dies for you
+    me.pet = null;
+    state.meDirty = true; saveMe(); notify();
+    state.justPetHit = { by: fromName || "someone" };
+    return { blocked: true, pet: true };
+  }
   const shield = lowestShield(me);
   if (shield) {
     const name = shield.def.name;
@@ -727,10 +736,34 @@ export function hitMonster(id) {
   return { ok: true, killed: true, coins, king: m.kind === "king" };
 }
 
+// Recruit a tired rat as a buddy. Needs a leash in hand, the rat tired and in
+// reach, and no current pet. The rat leaves the shared world and rides on me.pet.
+export function recruitRat(id) {
+  const me = state.me, s = state.shared;
+  if (!me || !me.created) return { ok: false, why: "Make a Joey first." };
+  if (!hasLeash(me)) return { ok: false, why: "Hold a leash to recruit a rat." };
+  if (petActive(me)) return { ok: false, why: "You already have a rat buddy." };
+  const m = s.monsters && s.monsters[id];
+  if (!m || m.kind !== "rat" || !m.tired) return { ok: false, why: "That rat can't be recruited." };
+  if (!withinReach(me, Math.round(m.x), Math.round(m.y))) return { ok: false, why: "Get closer to the rat." };
+  me.pet = { since: Date.now() };
+  delete s.monsters[id];
+  state.meDirty = true;
+  commit(); saveMe();
+  state.justPetGot = true;
+  return { ok: true };
+}
+
 // This player was hit by a monster: lose the lowest 1 (rat) or 2 (king) shields,
 // or die if you don't have that many.
 export function receiveMonsterHit(king) {
   const me = state.me; if (!me || !me.created) return;
+  if (petActive(me)) {                    // the rat buddy takes the hit and is gone
+    me.pet = null;
+    state.justPetHit = { by: king ? "The Rat King" : "a rat" };
+    state.meDirty = true; saveMe(); notify();
+    return;
+  }
   const need = king ? 2 : 1;
   const shields = equippedShields(me).slice().sort((a, b) => a.value - b.value);
   if (shields.length >= need) {

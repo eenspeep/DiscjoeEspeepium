@@ -9,11 +9,11 @@ import {
   footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt, hasSurface,
   walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
   attackRangeFor, interactRange, buildRange, sizeMult, withinReach,
-  enzoCells, isEnzoTile, enzoAnchor,
+  enzoCells, isEnzoTile, enzoAnchor, hasLeash, petActive,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
@@ -194,8 +194,20 @@ function doPush() {
 
 // Swing your equipped weapon at the nearest adjacent entity. Instant kill if
 // they have no shield; the weapon breaks either way (a knife after one swing).
+function doRecruit() {
+  const cands = [];
+  for (const [id, r] of renderMons) if (r.kind === "rat" && r.tired) cands.push({ id, x: r.x, y: r.y });
+  if (!cands.length) return onTileMessage("No tired rat nearby to leash. Wear a rat down first.");
+  let best = null, bd = interactRange(state.me) + 0.5;
+  for (const c of cands) { const d = Math.hypot(c.x - state.me.pos.x, c.y - state.me.pos.y); if (d <= bd) { bd = d; best = c; } }
+  if (!best) return onTileMessage("Get closer to a tired rat to leash it.");
+  const r = recruitRat(best.id);
+  onTileMessage(r.ok ? "You leashed a rat! It's your buddy for an hour." : r.why);
+}
+
 function doAttack() {
   if (!state.me.created) return;
+  if (hasLeash(state.me)) return doRecruit();
   if (!equippedWeapon(state.me)) return onTileMessage("You need a weapon in hand. Buy a knife and equip it.");
   const cands = [];
   for (const [id, r] of renderPeers) cands.push({ kind: "peer", id, x: r.x, y: r.y, name: r.name });
@@ -299,7 +311,7 @@ function updatePeers(dt) {
     r.x = lerp(r.x, p.x ?? r.x, clamp(dt * 8, 0, 1));
     r.y = lerp(r.y, p.y ?? r.y, clamp(dt * 8, 0, 1));
     r.moving = Math.hypot((p.x ?? 0) - r.x, (p.y ?? 0) - r.y) > 0.02;
-    r.name = p.name; r.look = p.look; r.worn = p.worn; r.size = p.size;
+    r.name = p.name; r.look = p.look; r.worn = p.worn; r.size = p.size; r.pet = p.pet;
   }
   for (const id of renderPeers.keys()) if (!live.has(id)) renderPeers.delete(id);
 }
@@ -639,6 +651,15 @@ function drawMe(t) {
     walking: state.me.moving, t, using, name: state.me.created ? state.me.name : "new Joey",
   };
   if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, { ...opts, worn: wornArt(state.me) });
+  if (state.me.created && petActive(state.me)) drawPetRat(p);
+}
+
+// A leashed rat buddy trots beside its owner (a small bobbing 🐀 at the feet).
+function drawPetRat(p) {
+  const zoom = camera.zoom, bob = Math.sin(now() / 220) * 1.5 * zoom;
+  ctx.font = `${13 * zoom}px system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("🐀", p.x + 13 * zoom, p.y + 2 * zoom + bob);
 }
 
 function drawPeer(r, t, isNpc = false) {
@@ -647,6 +668,7 @@ function drawPeer(r, t, isNpc = false) {
   const opts = { look: r.look, scale: camera.zoom * (r.size || 1), walking: r.moving, t, name: r.name || "JOEY" };
   if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, { ...opts, worn: r.worn || {} });
   ctx.globalAlpha = 1;
+  if (r.pet) drawPetRat(p);
   if (r.id === CHARLIE_ID) {
     ctx.font = `${15 * camera.zoom}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText("🧄", p.x, p.y - 52 * camera.zoom);
@@ -660,5 +682,6 @@ export function myPresence() {
     look: state.me.look, worn: wornArt(state.me),
     x: state.me.pos.x, y: state.me.pos.y, moving: !!state.me.moving,
     specialty: state.me.specialty, size: state.me.created ? sizeMult(state.me) : 1,
+    pet: state.me.created && petActive(state.me),
   };
 }

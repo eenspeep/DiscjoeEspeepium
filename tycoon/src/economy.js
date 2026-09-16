@@ -369,6 +369,8 @@ export const ITEMS = {
   knife: { name: "Knife", slot: "weapon", tier: 1, weapon: true, uses: 1, shape: "domino", art: "weapon", glyph: "🔪", color: "#b6bcc6", costUnit: 0.8 },
   machete: { name: "Machete", slot: "weapon", tier: 4, weapon: true, uses: 3, shape: "domino", art: "weapon", glyph: "🗡️", color: "#8a939f", costUnit: 1.4 },
   katana: { name: "Katana", slot: "weapon", tier: 7, weapon: true, uses: 8, shape: "line3", art: "weapon", glyph: "⚔️", color: "#dcdce4", costUnit: 2.1 },
+  // ---- leash: hold it (weapon slot) to recruit a tired rat as a buddy -------
+  leash: { name: "Rat Leash", slot: "weapon", tier: 2, leash: true, shape: "domino", art: "leash", glyph: "🪢", color: "#9a6b3f", costUnit: 1.1 },
   // ---- COMBAT: shields — each absorbs one lethal hit; the lowest-value one breaks
   // first. Tier 1 is torso; every higher tier opens a shield for another slot.
   shield_torso: { name: "Riot Shield", slot: "torso", tier: 1, shield: true, shape: "square", art: "shield", glyph: "🛡️", color: "#54648a", costUnit: 0.9 },
@@ -479,6 +481,22 @@ export function lowestShield(me) {
   return s.reduce((a, b) => (b.value < a.value ? b : a));
 }
 export function shieldCount(me) { return equippedShields(me).length; }
+
+// ---- pet rat (leash) ------------------------------------------------------
+// A leash in the weapon slot lets you recruit one tired rat. The rat rides in
+// me.pet = { since }. It fades after petMs, boosts soul channeling, and eats
+// one hit before your shields.
+export function hasLeash(me) {
+  const uid = me && me.equipment && me.equipment.weapon, inst = uid && me.items[uid], def = inst && ITEMS[inst.type];
+  return !!(def && def.leash);
+}
+export function petActive(me) {
+  return !!(me && me.pet && (Date.now() - me.pet.since) < TUNING.petMs);
+}
+export function petMsLeft(me) {
+  return petActive(me) ? Math.max(0, TUNING.petMs - (Date.now() - me.pet.since)) : 0;
+}
+export function petSoulMult(me) { return petActive(me) ? TUNING.petSoulMult : 1; }
 
 // ---- income + effects -----------------------------------------------------
 
@@ -717,6 +735,7 @@ export function soulRate(me, shared) {
   if (base <= 0) return 0;
   let mult = 1 + 0.2 * traitVal(me, "pray");   // "Praying speed" trait
   for (const d of equippedDefs(me)) if (d.soulBonus) mult += d.soulBonus;
+  mult *= petSoulMult(me);                      // a leashed rat buddy boosts channeling
   return Math.round(base * TUNING.soulScale * mult * ((me && me.soulMult) || 1) * 100) / 100;
 }
 

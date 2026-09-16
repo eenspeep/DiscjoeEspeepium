@@ -4,6 +4,24 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Rat leash (recruit a tired rat as a buddy) — SHIPPED
+Buy a **Rat Leash** (tier-2 gear, weapon slot) and equip it. Face a **tired**
+rat (the spinning-💫 kind) within interact range and press **Q**: instead of
+attacking, you leash it. The rat leaves `shared.monsters` and rides on your
+personal save as `me.pet = { since }`. Because the leash fills the weapon slot,
+you can hold **one rat at a time** (and can't also hold a weapon).
+
+While active (up to **60 min**, `TUNING.petMs`) the buddy:
+- multiplies your **soul channeling ×1.2** (`TUNING.petSoulMult`, applied in
+  `soulRate`),
+- acts as **one extra piece of armor**: it eats the next hit that lands on you
+  (player attack *or* monster hit), before any shield, then scurries off.
+
+HUD shows a 🐀 m:ss countdown chip; a small rat trots at your feet (and at
+peers' feet via a `pet` flag in presence). When the hour runs out the pet clears
+itself on the next economy tick. Nothing about the leash needs the host — recruit
+mutates shared like `hitMonster` does, and the armor/expiry are personal-state.
+
 ## 2026-09-16 — Rats + Rat King (monsters) — SHIPPED
 Monsters live in `shared.monsters`, host-simulated (`monsterTick`). They walk to
 the nearest player or furniture and attack once/sec. After 3 attacks a rat

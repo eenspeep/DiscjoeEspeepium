@@ -303,6 +303,7 @@ body {
 }
 .schip.brain { color: #4b56b8; }
 .schip.build { color: #c9772f; }
+.schip.pet { color: #9a6b3f; }
 .badge.big { font-size: 13px; padding: 8px 12px; }
 .badge.alert, .btn.alert { background: var(--gold); color: #3a2c00; }
 
