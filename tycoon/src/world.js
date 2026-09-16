@@ -8,12 +8,12 @@ import {
   FURNITURE, MODS, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isNearFootprint,
   footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt, hasSurface,
   walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
-  attackRangeFor, interactRange, buildRange, sizeMult,
-  enzoCells, isEnzoTile, enzoAnchor,
+  attackRangeFor, interactRange, buildRange, sizeMult, withinReach,
+  enzoCells, isEnzoTile, enzoAnchor, hasLeash, petActive,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
@@ -34,6 +34,7 @@ let mouse = { sx: 0, sy: 0, gx: 0, gy: 0, over: false };
 let target = null;
 let selectedKey = null;
 const renderPeers = new Map();
+const renderMons = new Map();
 const charlie = makeCharlie();
 function activeBots() { return isCharlieAlive() ? [charlie] : []; }
 let lastFrame = now();
@@ -54,6 +55,7 @@ export function initWorld(canvasEl, hooks = {}) {
     const k = e.key.toLowerCase();
     if (k === "e") { doPush(); return; }
     if (k === "q") { doAttack(); return; }
+    if (k === "escape") { setBuild(null); return; }   // drop what's in hand
     if (k === "r" && buildType) { buildRot = (buildRot + 1) % 4; return; }
     keys.add(k);
   });
@@ -192,18 +194,35 @@ function doPush() {
 
 // Swing your equipped weapon at the nearest adjacent entity. Instant kill if
 // they have no shield; the weapon breaks either way (a knife after one swing).
+function doRecruit() {
+  const cands = [];
+  for (const [id, r] of renderMons) if (r.kind === "rat" && r.tired) cands.push({ id, x: r.x, y: r.y });
+  if (!cands.length) return onTileMessage("No tired rat nearby to leash. Wear a rat down first.");
+  let best = null, bd = interactRange(state.me) + 0.5;
+  for (const c of cands) { const d = Math.hypot(c.x - state.me.pos.x, c.y - state.me.pos.y); if (d <= bd) { bd = d; best = c; } }
+  if (!best) return onTileMessage("Get closer to a tired rat to leash it.");
+  const r = recruitRat(best.id);
+  onTileMessage(r.ok ? "You leashed a rat! It's your buddy for an hour." : r.why);
+}
+
 function doAttack() {
   if (!state.me.created) return;
+  if (hasLeash(state.me)) return doRecruit();
   if (!equippedWeapon(state.me)) return onTileMessage("You need a weapon in hand. Buy a knife and equip it.");
   const cands = [];
   for (const [id, r] of renderPeers) cands.push({ kind: "peer", id, x: r.x, y: r.y, name: r.name });
   for (const n of activeBots()) cands.push({ kind: "bot", ref: n, x: n.x, y: n.y, name: n.name });
+  for (const [id, r] of renderMons) cands.push({ kind: "mon", id, x: r.x, y: r.y, name: r.kind === "king" ? "the Rat King" : "a rat" });
   let best = null, bd = attackRangeFor(state.me);   // "Melee range" trait
   for (const c of cands) { const d = Math.hypot(c.x - state.me.pos.x, c.y - state.me.pos.y); if (d <= bd) { bd = d; best = c; } }
   if (!best) return onTileMessage("Nothing in knife reach.");
   const def = useWeapon();   // breaks whether or not it kills
   const wname = def ? def.name : "weapon";
-  if (best.kind === "bot") {
+  if (best.kind === "mon") {
+    const r = hitMonster(best.id);
+    if (r.killed) onTileMessage("Killed " + best.name + "! +" + r.coins + "¢ — your " + wname + " broke.");
+    else if (r.blocked) onTileMessage("Struck " + best.name + " — its armor held" + (r.king ? " (♥" + r.guard + " left)" : "") + ". " + wname + " broke.");
+  } else if (best.kind === "bot") {
     const r = killCharlie(best.ref.x, best.ref.y);
     onTileMessage(r.ok ? ("You gutted Garlic Charlie! +" + r.bounty + "¢ — your " + wname + " broke.") : "He slipped away.");
   } else {
@@ -292,7 +311,7 @@ function updatePeers(dt) {
     r.x = lerp(r.x, p.x ?? r.x, clamp(dt * 8, 0, 1));
     r.y = lerp(r.y, p.y ?? r.y, clamp(dt * 8, 0, 1));
     r.moving = Math.hypot((p.x ?? 0) - r.x, (p.y ?? 0) - r.y) > 0.02;
-    r.name = p.name; r.look = p.look; r.worn = p.worn; r.size = p.size;
+    r.name = p.name; r.look = p.look; r.worn = p.worn; r.size = p.size; r.pet = p.pet;
   }
   for (const id of renderPeers.keys()) if (!live.has(id)) renderPeers.delete(id);
 }
@@ -324,6 +343,19 @@ function updateNPCs(dt) {
   }
 }
 
+function updateMonsters(dt) {
+  const mons = (state.shared && state.shared.monsters) || {}, live = new Set();
+  for (const [id, m] of Object.entries(mons)) {
+    live.add(id);
+    let r = renderMons.get(id);
+    if (!r) { r = { x: m.x, y: m.y }; renderMons.set(id, r); }
+    r.x = lerp(r.x, m.x, clamp(dt * 8, 0, 1));
+    r.y = lerp(r.y, m.y, clamp(dt * 8, 0, 1));
+    r.kind = m.kind; r.armor = m.armor; r.guard = m.guard; r.tired = m.tired;
+  }
+  for (const id of renderMons.keys()) if (!live.has(id)) renderMons.delete(id);
+}
+
 function makeCharlie() {
   return { id: CHARLIE_ID, x: 2, y: 2, target: null, pause: Math.random() * 3, moving: false, _alive: true, look: lookFromSeed("garlic-charlie-vii"), name: "GARLIC CHARLIE" };
 }
@@ -334,7 +366,7 @@ function loop() {
   const t = now();
   const dt = clamp((t - lastFrame) / 1000, 0, 0.1);
   lastFrame = t;
-  updateMe(dt); updatePeers(dt); updateNPCs(dt);
+  updateMe(dt); updatePeers(dt); updateNPCs(dt); updateMonsters(dt);
 
   const tw = gridWorld(state.me.pos.x, state.me.pos.y);
   camera.x = lerp(camera.x, tw.x, clamp(dt * 4, 0, 1));
@@ -360,20 +392,31 @@ function draw(t) {
   }
   for (const [gx, gy] of floorCells) drawBackWalls(s, gx, gy, walk);
 
+  // when holding something, shade every tile you can reach so the placement
+  // range is obvious (you can only build within interact range)
+  if (state.me.created && (buildType || buildMod || buildDoor)) {
+    const R = interactRange(state.me), px = Math.round(state.me.pos.x), py = Math.round(state.me.pos.y);
+    for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) {
+      const x = px + dx, y = py + dy;
+      if (isWalkable(s, x, y)) drawTile(x, y, "rgba(90,160,240,0.13)");
+    }
+  }
+
   if (mouse.over && state.me.created) {
+    const reach = withinReach(state.me, mouse.gx, mouse.gy);
     if (buildType) {
       const blocked = blockedTiles(s);
       for (const [cx, cy] of footprintCells(buildType, mouse.gx, mouse.gy, buildRot)) {
-        const ok = isWalkable(s, cx, cy) && !blocked.has(cx + "," + cy) && !s.doors[cx + "," + cy];
+        const ok = reach && isWalkable(s, cx, cy) && !blocked.has(cx + "," + cy) && !s.doors[cx + "," + cy];
         drawTile(cx, cy, ok ? "rgba(70,190,120,0.55)" : "rgba(230,80,70,0.5)");
       }
     } else if (buildMod) {
       const fKey = furnitureAnchorAt(s, mouse.gx, mouse.gy);
       const f = fKey && s.furniture[fKey];
-      const ok = f && hasSurface(f.type) && !(f.mods && f.mods[mouse.gx + "," + mouse.gy]);
+      const ok = reach && f && hasSurface(f.type) && !(f.mods && f.mods[mouse.gx + "," + mouse.gy]);
       if (inBounds(mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(150,90,220,0.6)" : "rgba(230,80,70,0.45)");
     } else if (buildDoor) {
-      const ok = inHall(s, mouse.gx, mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !s.furniture[mouse.gx + "," + mouse.gy] && !s.sites[mouse.gx + "," + mouse.gy];
+      const ok = reach && inHall(s, mouse.gx, mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !s.furniture[mouse.gx + "," + mouse.gy] && !s.sites[mouse.gx + "," + mouse.gy];
       if (isWalkable(s, mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(90,160,240,0.55)" : "rgba(230,80,70,0.45)");
     } else if (isWalkable(s, mouse.gx, mouse.gy)) {
       drawTile(mouse.gx, mouse.gy, "rgba(90,120,220,0.35)");
@@ -405,6 +448,7 @@ function draw(t) {
   items.push({ depth: state.me.pos.x + state.me.pos.y, kind: "me" });
   for (const [, r] of renderPeers) items.push({ depth: r.x + r.y, kind: "peer", r });
   for (const n of activeBots()) items.push({ depth: n.x + n.y, kind: "npc", n });
+  for (const [, r] of renderMons) items.push({ depth: r.x + r.y + 0.02, kind: "mon", r });
   items.sort((a, b) => a.depth - b.depth);
 
   for (const it of items) {
@@ -416,6 +460,28 @@ function draw(t) {
     else if (it.kind === "me") drawMe(t);
     else if (it.kind === "peer") drawPeer(it.r, t);
     else if (it.kind === "npc") drawPeer(it.n, t, true);
+    else if (it.kind === "mon") drawMonster(it.r);
+  }
+}
+
+function drawMonster(r) {
+  const p = project(r.x, r.y, canvas), zoom = camera.zoom, king = r.kind === "king";
+  ctx.save(); ctx.scale(1, 0.5); ctx.beginPath(); ctx.arc(p.x, (p.y + 4 * zoom) / 0.5, (king ? 12 : 7) * zoom, 0, 7); ctx.fillStyle = "rgba(0,0,0,0.18)"; ctx.fill(); ctx.restore();
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.globalAlpha = r.tired ? 0.7 : 1;
+  ctx.font = `${(king ? 30 : 17) * zoom}px system-ui, sans-serif`;
+  ctx.fillText("🐀", p.x, p.y - (king ? 8 : 5) * zoom);
+  ctx.globalAlpha = 1;
+  if (r.tired) {   // spinning "tired" spiral above the head
+    const spin = (now() / 500) % (Math.PI * 2);
+    ctx.save(); ctx.translate(p.x, p.y - 18 * zoom); ctx.rotate(spin);
+    ctx.font = `${12 * zoom}px system-ui, sans-serif`; ctx.fillText("💫", 0, 0); ctx.restore();
+  }
+  if (king) {
+    ctx.font = `${16 * zoom}px system-ui, sans-serif`; ctx.fillText("👑", p.x, p.y - 26 * zoom);
+    ctx.font = `${10 * zoom}px "Fredoka", system-ui, sans-serif`; ctx.fillStyle = "#b04a4a"; ctx.fillText("♥ " + r.guard, p.x, p.y + 6 * zoom);
+  } else if (r.armor) {
+    ctx.font = `${11 * zoom}px system-ui, sans-serif`; ctx.fillText("🛡️", p.x + 8 * zoom, p.y - 11 * zoom);
   }
 }
 
@@ -533,7 +599,7 @@ const TAG_TINT = { brain: "#4b56b8", build: "#c9772f", neutral: "#7f8794" };
 
 function drawFurniture(ax, ay, f, selected, using) {
   const def = FURNITURE[f.type];
-  const tint = TAG_TINT[def.tag] || "#9aa3af";
+  const tint = f.broken ? "#7c7c80" : (TAG_TINT[def.tag] || "#9aa3af");   // gray when rat-mauled
   const cells = footprintCells(f.type, ax, ay, f.rot || 0);
   const z = def.h * camera.zoom * (1 + (f.level - 1) * 0.12);
   drawCellsPrism(cells, tint, z, { selected, using });
@@ -541,7 +607,10 @@ function drawFurniture(ax, ay, f, selected, using) {
   const cen = centroid(cells), p = project(cen.x, cen.y, canvas);
   ctx.font = `${15 * camera.zoom}px system-ui, sans-serif`;
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.globalAlpha = f.broken ? 0.55 : 1;
   ctx.fillText(def.glyph, p.x, p.y - z - 1 * camera.zoom);
+  ctx.globalAlpha = 1;
+  if (f.broken) { ctx.font = `${13 * camera.zoom}px system-ui, sans-serif`; ctx.fillText("⚠️", p.x + 9 * camera.zoom, p.y - z - 8 * camera.zoom); }
   if (f.level > 1) {
     ctx.font = `${9 * camera.zoom}px system-ui, sans-serif`;
     ctx.fillStyle = "rgba(255,255,255,0.92)";
@@ -582,6 +651,15 @@ function drawMe(t) {
     walking: state.me.moving, t, using, name: state.me.created ? state.me.name : "new Joey",
   };
   if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, { ...opts, worn: wornArt(state.me) });
+  if (state.me.created && petActive(state.me)) drawPetRat(p);
+}
+
+// A leashed rat buddy trots beside its owner (a small bobbing 🐀 at the feet).
+function drawPetRat(p) {
+  const zoom = camera.zoom, bob = Math.sin(now() / 220) * 1.5 * zoom;
+  ctx.font = `${13 * zoom}px system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("🐀", p.x + 13 * zoom, p.y + 2 * zoom + bob);
 }
 
 function drawPeer(r, t, isNpc = false) {
@@ -590,6 +668,7 @@ function drawPeer(r, t, isNpc = false) {
   const opts = { look: r.look, scale: camera.zoom * (r.size || 1), walking: r.moving, t, name: r.name || "JOEY" };
   if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, { ...opts, worn: r.worn || {} });
   ctx.globalAlpha = 1;
+  if (r.pet) drawPetRat(p);
   if (r.id === CHARLIE_ID) {
     ctx.font = `${15 * camera.zoom}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
     ctx.fillText("🧄", p.x, p.y - 52 * camera.zoom);
@@ -603,5 +682,6 @@ export function myPresence() {
     look: state.me.look, worn: wornArt(state.me),
     x: state.me.pos.x, y: state.me.pos.y, moving: !!state.me.moving,
     specialty: state.me.specialty, size: state.me.created ? sizeMult(state.me) : 1,
+    pet: state.me.created && petActive(state.me),
   };
 }

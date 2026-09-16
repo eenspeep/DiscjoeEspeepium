@@ -9,6 +9,7 @@ import {
   tryBuyItem, equipItem, unequipItem, moveItem, rotateItem, trySellItem,
   cancelSite, cancelBuild,
   tryLockDoor, tryUnlockDoor, tryRemoveDoor, checkDoorPassword,
+  tryBuyRatEgg, tryRepairFurniture,
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
@@ -16,11 +17,12 @@ import {
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
   furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
-  currentTier, nextTier, researchTotal, siteProgress, tierPower, TIER_COUNT,
+  currentTier, nextTier, researchTotal, siteProgress, tierPower, TIER_COUNT, TIER_NAME,
   rpRate, soulRate, tierProgress, esoProgress,
   esoOfItem, esoOfFurniture, currentEso, nextEso, ESO_MAX, ESO_NAME,
   MODS, MOD_ORDER, modPrice, isModUnlocked,
-  blackMarkCells, blackMarkSlots, TRAITS,
+  blackMarkCells, blackMarkSlots, TRAITS, repairCost,
+  petActive,
 } from "./economy.js";
 import { LOOK_PICKERS, lookColor, drawJoey, drawJoeySprite, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setSelected, unlockDoorLocal } from "./world.js";
@@ -40,10 +42,11 @@ export function initUI(authApi) {
   onChange(refresh);
   refresh();
   if (!state.me.created) openCreator();
-  setInterval(renderHud, 500);
+  setInterval(() => { renderHud(); renderBuildbar(); }, 500);   // keep hand bar synced with world build state
   setInterval(() => {
     if (openView === "pot") renderPot();
     else if (openView === "site") renderSite();
+    else if (openView === "shop") renderShop();
     else if (openView === "locker" && state.me.buildQueue.length) renderLocker();
   }, 1000);
   setInterval(() => {
@@ -53,6 +56,10 @@ export function initUI(authApi) {
     if (state.justFirstKill) { flash("⚠️ First kill — a warning. Kill again and black marks eat your bag."); state.justFirstKill = null; }
     if (state.justBlackMark) { flash("🖤 A black mark stains your soul — a bag slot is lost."); state.justBlackMark = null; }
     if (state.justRefund) { flash("💸 +" + fmt(state.justRefund) + " refunded to you (someone sold furniture you paid for)."); state.justRefund = null; }
+    if (state.justRatKing) { flash("👑🐀 The rats formed a RAT KING! 5 armor, and it smashes 2 of your shields per hit."); state.justRatKing = null; }
+    if (state.justMonsterBlock) { flash("🛡️ " + state.justMonsterBlock.by + " broke " + state.justMonsterBlock.n + " of your shields!"); state.justMonsterBlock = null; }
+    if (state.justPetGot) { flash("🐀 You leashed a rat buddy! x1.2 soul, and it eats one hit for you."); state.justPetGot = null; }
+    if (state.justPetHit) { flash("🐀💥 Your rat buddy took a hit from " + state.justPetHit.by + " and scurried off."); state.justPetHit = null; }
     if (state.justKilled) { flash("☠️ Killed by " + state.justKilled + ". Your gear dropped where you fell. Build a new Joey."); state.justKilled = null; closePanel(); ensureCreator(); }
   }, 400);
 }
@@ -94,6 +101,7 @@ function refresh() {
   else if (openView === "pot") renderPot();
   else if (openView === "site") renderSite();
   else if (openView === "door") renderDoor();
+  else if (openView === "shop") renderShop();
 }
 
 // ---- HUD ------------------------------------------------------------------
@@ -112,6 +120,7 @@ function renderHud() {
         el("span", { class: "schip build", title: "BUILD", text: STATS.build.glyph + " " + me.stats.build }),
         el("span", { class: "schip research", title: researchTitle(), text: "🔬 T" + currentTier(state.shared) + "/" + TIER_COUNT }),
         el("span", { class: "schip soul", title: soulTitle(), text: "🔮 E" + currentEso(me) + "/" + ESO_MAX }),
+        petActive(me) ? el("span", { class: "schip pet", title: "Rat buddy: x1.2 soul + eats one hit (stays while the leash is in hand)", text: "🐀 buddy" }) : null,
       ]) : null,
       me.created ? el("div", { class: "hud-tracks" }, [
         progTrack("research", "🔬", tierProgress(state.shared), rpRate(me, state.shared), researchTitle()),
@@ -121,6 +130,7 @@ function renderHud() {
     el("div", { class: "hud-right" }, [
       el("span", { class: "badge", text: mode + host }),
       el("span", { class: "badge muted", text: "👥 " + (state.peers.length + 1) }),
+      el("button", { class: "btn" + (openView === "shop" ? " alert" : ""), onclick: toggleShop }, ["🛒 Shop"]),
       el("button", { class: "btn", onclick: toggleLocker }, ["Locker"]),
       el("button", { class: "btn" + (voting ? " alert" : ""), onclick: togglePot }, [voting ? "Vote!" : "Team Pot"]),
       el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · E shove · Q attack (need a weapon in hand) · click a 📦 to grab loot · stand by furniture to use it"), title: "Help" }, ["?"]),
@@ -128,50 +138,90 @@ function renderHud() {
   );
 }
 
-// ---- build bar ------------------------------------------------------------
-
-const TAG_CLASS = { brain: "t-brain", build: "t-build", neutral: "t-neutral" };
+// ---- "in hand" bar (what you're about to place) ---------------------------
+// The old furniture hotbar is gone. You buy from the Shop panel, which puts the
+// item in your hands; this bar just shows what you're holding + a Cancel.
+export function clearHands() { setBuild(null); renderBuildbar(); }
+function heldLabel() {
+  if (getBuild()) { const d = FURNITURE[getBuild()]; return d.glyph + " " + d.name; }
+  if (getBuildMod()) { const m = MODS[getBuildMod()]; return m.glyph + " " + m.name; }
+  if (getBuildDoor()) return "🚪 Door";
+  return null;
+}
 function renderBuildbar() {
   if (!buildbar) return;
-  if (!state.me.created) { buildbar.replaceChildren(); return; }
-  const s = state.shared, active = getBuild(), activeMod = getBuildMod(), me = state.me;
-  const cursor = el("button", { class: "build-btn cursor" + (active || activeMod ? "" : " active"), title: "Walk mode", onclick: () => selectBuild(null) }, [el("span", { class: "b-glyph", text: "👆" }), el("span", { class: "b-name", text: "Walk" })]);
-  const btns = FURNITURE_ORDER.filter((type) => furnitureTier(type) <= currentTier(s)).map((type) => {
-    const def = FURNITURE[type];
-    const esoReq = esoOfFurniture(type);
-    if (esoReq > currentEso(me)) {
-      return el("button", { class: "build-btn locked", title: def.name + " — needs " + ESO_NAME[esoReq] + " esotericism", onclick: () => flash(def.name + " needs " + ESO_NAME[esoReq] + " soul. Channel at an esoteric altar.") },
-        [el("span", { class: "b-glyph", text: "🔮" }), el("span", { class: "b-name", text: def.name }), el("span", { class: "b-cost", text: "E" + esoReq })]);
-    }
-    const cost = furnitureBuyCost(s, type), afford = me.credits >= cost;
-    const val = Math.round(furnitureValue({ type, level: 1 }) * 100) / 100;
-    return el("button", { class: "build-btn " + (TAG_CLASS[def.tag] || "") + (active === type ? " active" : "") + (afford ? "" : " poor"), title: def.name + " (T" + def.tier + ") — " + (def.soul ? "channel SOUL here · " : "") + def.tag.toUpperCase() + ", +" + fmt(val) + "/s adjacent · " + furnitureWork(type) + " work", onclick: () => selectBuild(type) },
-      [el("span", { class: "b-glyph", text: def.glyph }), el("span", { class: "b-name", text: def.name }), el("span", { class: "b-cost", text: fmt(cost) })]);
-  });
-  const addRoom = canAddRoom(s)
-    ? el("button", { class: "build-btn expand" + (state.me.credits >= roomCost(s) ? "" : " poor"), title: "Add a side room joined by a hallway", onclick: () => { const r = tryAddRoom(); flash(r.ok ? "New room added down the hall." : (r.why || "Can't add a room.")); } }, [el("span", { class: "b-glyph", text: "➕" }), el("span", { class: "b-name", text: "Add Room" }), el("span", { class: "b-cost", text: fmt(roomCost(s)) })])
-    : el("button", { class: "build-btn expand disabled" }, [el("span", { class: "b-glyph", text: "🏢" }), el("span", { class: "b-name", text: "Max" })]);
-  const doorReady = currentTier(s) >= TUNING.doorTier;
-  const activeDoor = getBuildDoor();
-  const door = doorReady
-    ? el("button", { class: "build-btn door" + (activeDoor ? " active" : "") + (me.credits >= TUNING.doorCost ? "" : " poor"), title: "Install a door in a hallway (password-lock it later)", onclick: () => selectDoor() }, [el("span", { class: "b-glyph", text: "🚪" }), el("span", { class: "b-name", text: "Door" }), el("span", { class: "b-cost", text: fmt(TUNING.doorCost) })])
-    : el("button", { class: "build-btn door locked", title: "Doors unlock at research Tier " + TUNING.doorTier, onclick: () => flash("Doors unlock at research Tier " + TUNING.doorTier + ". Keep researching with BRAIN furniture.") }, [el("span", { class: "b-glyph", text: "🔒" }), el("span", { class: "b-name", text: "Door" }), el("span", { class: "b-cost", text: "T" + TUNING.doorTier })]);
-  const nt = nextTier(s);
-  const teaser = nt ? el("button", { class: "build-btn locked", title: "Research " + (nt.need - nt.have) + " more to unlock Tier " + nt.tier, onclick: () => flash("Next: Tier " + nt.tier + " " + nt.name + " — " + nt.have + "/" + nt.need + " research. Stand at BRAIN furniture.") },
-    [el("span", { class: "b-glyph", text: "🔒" }), el("span", { class: "b-name", text: "Tier " + nt.tier }), el("span", { class: "b-cost", text: "🔬" })]) : null;
-  const KIND_GLYPH = { income: "¢", research: "🔬", build: "🔧" };
-  const modBtns = MOD_ORDER.filter((type) => isModUnlocked(type, s)).map((type) => {
-    const m = MODS[type], price = modPrice(type), afford = me.credits >= price;
-    return el("button", { class: "build-btn mod" + (activeMod === type ? " active" : "") + (afford ? "" : " poor"), title: m.name + " — node mod, +" + fmt(m.unit * tierPower(m.tier)) + " flat " + m.kind + " (mount on a surface)", onclick: () => selectMod(type) },
-      [el("span", { class: "b-glyph", text: m.glyph }), el("span", { class: "b-name", text: m.name }), el("span", { class: "b-cost", text: fmt(price) })]);
-  });
-  const modSep = modBtns.length ? [el("span", { class: "build-sep", text: "Mods" })] : [];
-
-  buildbar.replaceChildren(cursor, ...btns, ...modSep, ...modBtns, addRoom, door, ...(teaser ? [teaser] : []));
+  const label = state.me.created ? heldLabel() : null;
+  if (!label) { buildbar.replaceChildren(); buildbar.classList.remove("show"); return; }
+  buildbar.classList.add("show");
+  buildbar.replaceChildren(
+    el("span", { class: "hand-label", text: "Holding: " + label }),
+    el("span", { class: "hand-hint", text: "click within reach" + (getBuild() ? " · R to rotate" : "") }),
+    el("button", { class: "btn small", onclick: clearHands }, ["Put away"]),
+  );
 }
-function selectBuild(type) { setBuild(getBuild() === type ? null : type); if (getBuild()) flash("Click a floor tile to place your " + FURNITURE[getBuild()].name + " · R to rotate."); renderBuildbar(); }
-function selectMod(type) { setBuildMod(getBuildMod() === type ? null : type); if (getBuildMod()) flash("Click a surface tile of a desk/table to mount the " + MODS[getBuildMod()].name + "."); renderBuildbar(); }
-function selectDoor() { setBuildDoor(!getBuildDoor()); if (getBuildDoor()) flash("Click a hallway tile to install a door."); renderBuildbar(); }
+
+// ---- Shop panel -----------------------------------------------------------
+
+function toggleShop() { if (openView === "shop") return closePanel(); openView = "shop"; setSelected(null); renderShop(); showPanel(); }
+function shopRow(glyph, name, meta, price, afford, onclick, extraClass = "") {
+  return el("button", { class: "shop-row" + (afford ? "" : " poor") + (extraClass ? " " + extraClass : ""), onclick }, [
+    el("span", { class: "shop-glyph", text: glyph }),
+    el("span", { class: "shop-body" }, [el("span", { class: "shop-name", text: name }), el("span", { class: "shop-meta muted small", text: meta })]),
+    el("span", { class: "shop-price", text: fmt(price) }),
+  ]);
+}
+function takeFurniture(type) { setBuild(type); flash("Holding " + FURNITURE[type].name + " — click a tile within reach. R rotates, Put Away to drop."); closePanel(); renderBuildbar(); }
+function takeMod(type) { setBuildMod(type); flash("Holding " + MODS[type].name + " — click a desk/table surface within reach."); closePanel(); renderBuildbar(); }
+function takeDoor() { setBuildDoor(true); flash("Holding a door — click a hallway tile within reach."); closePanel(); renderBuildbar(); }
+
+function renderShop() {
+  const s = state.shared, me = state.me, kids = [panelHeader("🛒 Shop")];
+  kids.push(el("p", { class: "muted small", text: "Pick something to hold, then click a tile within reach to place it. You keep holding it, so you can drop several." }));
+
+  // Expansion: Add Room (instant) + Door (held)
+  kids.push(el("div", { class: "ward-label", text: "Expansion" }));
+  kids.push(canAddRoom(s)
+    ? shopRow("➕", "Add Room", "grow the office down a new hallway", roomCost(s), me.credits >= roomCost(s), () => { const r = tryAddRoom(); flash(r.ok ? "New room added down the hall." : (r.why || "Can't add a room.")); if (r.ok) renderShop(); })
+    : el("div", { class: "shop-row locked", text: "🏢 Office is at max size" }));
+  kids.push(currentTier(s) >= TUNING.doorTier
+    ? shopRow("🚪", "Door", "install in a hallway, lock it later", TUNING.doorCost, me.credits >= TUNING.doorCost, takeDoor)
+    : el("div", { class: "shop-row locked", text: "🔒 Door — unlocks at research Tier " + TUNING.doorTier }));
+
+  // Node mods
+  const modTypes = MOD_ORDER.filter((t) => isModUnlocked(t, s));
+  if (modTypes.length) {
+    kids.push(el("div", { class: "ward-label", text: "Node Mods · mount on a desk/table surface" }));
+    for (const t of modTypes) { const m = MODS[t], price = modPrice(t); kids.push(shopRow(m.glyph, m.name, "+" + fmt(m.unit * tierPower(m.tier)) + " flat " + m.kind, price, me.credits >= price, () => takeMod(t))); }
+  }
+
+  // Monsters
+  kids.push(el("div", { class: "ward-label", text: "Monsters · unleash rats (they maul furniture + Joeys)" }));
+  kids.push(shopRow("🥚", "Rat Egg", "hatches one rat next to you, right now", TUNING.ratEggCost, me.credits >= TUNING.ratEggCost, () => { const r = tryBuyRatEgg(); flash(r.ok ? "🐀 A rat scurries out!" : (r.why || "Can't buy.")); if (r.ok) renderShop(); }));
+
+  // Furniture by research tier
+  kids.push(el("div", { class: "ward-label", text: "Furniture · research unlocks tiers" }));
+  for (let t = 1; t <= TIER_COUNT; t++) {
+    const types = FURNITURE_ORDER.filter((ty) => furnitureTier(ty) === t);
+    if (!types.length) continue;
+    if (tierUnlocked(t, s)) {
+      kids.push(el("div", { class: "tier-head", text: "Tier " + t + " · " + TIER_NAME[t] }));
+      for (const ty of types) {
+        const def = FURNITURE[ty], esoReq = esoOfFurniture(ty), cost = furnitureBuyCost(s, ty);
+        const val = Math.round(furnitureValue({ type: ty, level: 1 }) * 100) / 100;
+        const meta = def.ratSpawner ? "spawns rats every 10 min (upgrade = more)" : (def.soul ? "channel SOUL · " : "") + def.tag.toUpperCase() + " +" + fmt(val) + "/s · " + furnitureWork(ty) + "w";
+        if (esoReq > currentEso(me)) {
+          kids.push(shopRow("🔮", def.name, "🔮 " + ESO_NAME[esoReq] + " soul needed", cost, false, () => flash(def.name + " needs " + ESO_NAME[esoReq] + " soul. Channel at an esoteric altar."), "eso-locked"));
+        } else {
+          kids.push(shopRow(def.glyph, def.name, meta, cost, me.credits >= cost, () => takeFurniture(ty)));
+        }
+      }
+    } else {
+      const nt = nextTier(s), isNext = nt && nt.tier === t;
+      kids.push(el("div", { class: "tier-head locked", text: "🔒 Tier " + t + " · " + TIER_NAME[t] + (isNext ? " — " + fmt(nt.have) + "/" + fmt(nt.need) + " research" : "") }));
+    }
+  }
+  panel.replaceChildren(...kids);
+}
 
 // ---- furniture inspector --------------------------------------------------
 
@@ -184,15 +234,22 @@ function renderFurniture() {
   const [gx, gy] = openKey.split(",").map(Number);
   const prot = isProtected(state.shared, gx, gy);
   const iPaid = !f.paidBy || f.paidBy === state.me.id;
+  const actions = [];
+  if (f.broken) {
+    const rc = repairCost(f);
+    actions.push(el("button", { class: "btn primary" + (state.me.credits >= rc ? "" : " poor"), onclick: () => { const r = tryRepairFurniture(openKey); flash(r.ok ? def.name + " repaired." : (r.why || "Can't repair.")); } }, ["Repair — " + fmt(rc)]));
+  } else {
+    actions.push(el("button", { class: "btn primary" + (state.me.credits >= up ? "" : " poor"), onclick: () => { const r = tryUpgradeFurniture(openKey); flash(r.ok ? def.name + " upgraded." : (r.why || "Can't upgrade.")); } }, [(def.ratSpawner ? "More rats — " : "Upgrade — ") + fmt(up)]));
+  }
+  actions.push(el("button", { class: "btn", onclick: () => { const r = trySellFurniture(openKey); flash(!r.ok ? (r.why || "Can't sell.") : r.toOther ? "Sold — " + fmt(r.refund) + " returned to its buyer." : "Sold for " + fmt(r.refund) + "."); if (r.ok) closePanel(); } }, ["Sell"]));
+
   panel.replaceChildren(
     panelHeader(def.glyph + " " + def.name),
-    el("p", { class: "muted small", text: def.tag.toUpperCase() + " furniture. Buffs anyone standing next to it." }),
+    el("p", { class: "muted small", text: def.ratSpawner ? "Spawns " + f.level + " rat" + (f.level > 1 ? "s" : "") + " every 10 min. Upgrade for more." : def.tag.toUpperCase() + " furniture. Buffs anyone standing next to it." }),
+    f.broken ? el("p", { class: "broken-note small", text: "🐀 In disrepair after a rat attack — earns nothing until repaired." }) : null,
     prot ? el("p", { class: "muted small", text: iPaid ? "🛡️ Protected room — anyone can sell this, and the refund comes back to you (you paid for it)." : "🛡️ Protected room — anyone can sell this, and the refund goes back to whoever paid for it." }) : null,
     stat("Level", String(f.level)), stat("Base value", "+" + fmt(raw) + "/s"), stat("For you (stats)", "+" + fmt(Math.round(mine * 100) / 100) + "/s"),
-    el("div", { class: "panel-actions" }, [
-      el("button", { class: "btn primary" + (state.me.credits >= up ? "" : " poor"), onclick: () => { const r = tryUpgradeFurniture(openKey); flash(r.ok ? def.name + " upgraded." : (r.why || "Can't upgrade.")); } }, ["Upgrade — " + fmt(up)]),
-      el("button", { class: "btn", onclick: () => { const r = trySellFurniture(openKey); flash(!r.ok ? (r.why || "Can't sell.") : r.toOther ? "Sold — " + fmt(r.refund) + " returned to its buyer." : "Sold for " + fmt(r.refund) + "."); if (r.ok) closePanel(); } }, ["Sell"]),
-    ])
+    el("div", { class: "panel-actions" }, actions)
   );
 }
 
@@ -246,6 +303,7 @@ function toggleLocker() { if (openView === "locker") return closePanel(); openVi
 
 function itemBuffText(def) {
   if (def.weapon) return "🔪 instant kill · " + def.uses + " use" + (def.uses > 1 ? "s" : "");
+  if (def.leash) return "🪢 leash a tired rat · x1.2 soul · +1 armor";
   if (def.shield) return "🛡️ blocks 1 hit";
   if (def.value) return "+" + fmt(Math.round(def.value * tierPower(def.tier) * 100) / 100) + "/s" + (def.tag && def.tag !== "neutral" ? " " + def.tag[0].toUpperCase() : "");
   if (def.mult) return "+" + Math.round(def.mult * 100) + "%";

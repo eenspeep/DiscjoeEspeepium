@@ -99,22 +99,25 @@ body {
 .btn.big { width: 100%; padding: 12px; font-size: 16px; margin-top: 12px; }
 
 /* ---- build bar ---------------------------------------------------------- */
+/* the bottom bar now only shows what you're holding to place (empty otherwise) */
 .buildbar {
   position: fixed;
   left: 50%;
-  bottom: 16px;
+  bottom: 18px;
   transform: translateX(-50%);
-  display: flex;
-  gap: 8px;
-  padding: 8px;
+  display: none;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px 8px 16px;
   background: var(--card);
-  border-radius: 18px;
+  border-radius: 999px;
   box-shadow: var(--shadow);
   max-width: calc(100vw - 24px);
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-.buildbar::-webkit-scrollbar { display: none; }
+.buildbar.show { display: flex; }
+.hand-label { font-family: "Fredoka", sans-serif; font-weight: 700; font-size: 14px; white-space: nowrap; }
+.hand-hint { color: var(--muted); font-size: 12px; white-space: nowrap; }
+@media (max-width: 560px) { .hand-hint { display: none; } }
 .build-btn {
   border: 2px solid transparent;
   background: var(--card-2);
@@ -300,6 +303,7 @@ body {
 }
 .schip.brain { color: #4b56b8; }
 .schip.build { color: #c9772f; }
+.schip.pet { color: #9a6b3f; }
 .badge.big { font-size: 13px; padding: 8px 12px; }
 .badge.alert, .btn.alert { background: var(--gold); color: #3a2c00; }
 
@@ -420,6 +424,7 @@ body {
 
 .login-modal .field { margin: 10px 0; }
 .login-err { color: var(--danger); min-height: 16px; margin: 4px 0; }
+.broken-note { color: var(--danger); font-weight: 600; margin: 4px 0; }
 
 @media (max-width: 560px) {
   .coin-amt { font-size: 22px; }

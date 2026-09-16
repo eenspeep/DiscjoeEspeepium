@@ -74,6 +74,19 @@ export const TUNING = {
   charlieMaxFurniture: 40,              // stop Charlie buying once the office is this full
   charlieBountyMult: 60,                // coins the killer takes = this × current tier
   killSoulMult: 0.1,                    // each kill nudges your soul channeling (sin fuels it)
+
+  // Rats + monsters
+  ratEggCost: 350,                      // instant-use egg spawns one rat
+  ratSpawnMs: 10 * 60 * 1000,           // Rat Motel spawns level-many rats this often
+  ratMaxAlive: 10,                      // >10 rats coalesce into a Rat King
+  ratAttacks: 3,                        // a rat tires (despawns) after this many attacks
+  ratAttackMs: 1000,                    // one attack per second
+  ratSpeed: 2.2,                        // tiles/sec
+  ratArmorChance: 0.06,                 // rare chance a rat spawns wearing a shield
+  ratCoinMin: 1, ratCoinMax: 1000,      // coins a rat drops to its killer
+  kingGuard: 5,                         // hits to kill the Rat King
+  kingCoinMin: 800, kingCoinMax: 6000,  // coins the Rat King drops
+  petSoulMult: 1.2,                     // a rat buddy multiplies your soul channeling
 };
 
 export const CHARLIE_ID = "garlic-charlie";

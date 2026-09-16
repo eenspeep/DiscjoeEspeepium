@@ -4,6 +4,57 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Rat leash (recruit a tired rat as a buddy) — SHIPPED
+Buy a **Rat Leash** (tier-2 gear, weapon slot) and equip it. Face a **tired**
+rat (the spinning-💫 kind) within interact range and press **Q**: instead of
+attacking, you leash it. The rat leaves `shared.monsters` and rides on your
+personal save as `me.pet`. Because the leash fills the weapon slot, you can hold
+**one rat at a time** and can't also hold a weapon.
+
+The buddy stays **as long as the leash is in your hand** (no timer — the hand
+slot is the whole cost). Put the leash away or swap to a weapon and the rat
+wanders off (`petActive` = `me.pet && hasLeash`). While active it:
+- multiplies your **soul channeling ×1.2** (`TUNING.petSoulMult`, applied in
+  `soulRate`),
+- acts as **one extra piece of armor**: it eats the next hit that lands on you
+  (player attack *or* monster hit), before any shield, then scurries off.
+
+HUD shows a 🐀 buddy chip; a small rat trots at your feet (and at peers' feet via
+a `pet` flag in presence). Nothing about the leash needs the host — recruit
+mutates shared like `hitMonster` does, and the armor is personal-state.
+
+## 2026-09-16 — Rats + Rat King (monsters) — SHIPPED
+Monsters live in `shared.monsters`, host-simulated (`monsterTick`). They walk to
+the nearest player or furniture and attack once/sec. After 3 attacks a rat
+**tires**: it stops attacking, shows a spinning 💫, and wanders slowly (it does
+not despawn — you can still kill it). Furniture hit goes **broken** (grays out, earns nothing, ⚠️) until
+repaired for `repairCost` = ½ base + ½ of every upgrade paid. A player hit loses
+their lowest shield, or dies if unarmored (relayed to remote peers via a
+`monsterHit` message, same trust model as PvP). Rats can't attack doors and are
+blocked by locked doors.
+
+Spawns: **Rat Egg** (instant shop buy → one rat by you) and **Rat Motel**
+(tier-3 furniture, spawns `level` rats every 10 min; upgrade for more). Rats are
+killable with a weapon (Q); they rarely spawn wearing a shield that absorbs a
+hit and drops as loot. A rat drops 1–1000 coins to its killer.
+
+Cap: only 10 rats alive — the 11th makes the swarm **coalesce into a Rat King**
+(guard 5, so 6 weapon hits to kill; drops 800–6000 coins). The king breaks your
+2 lowest shields per hit, or kills you with fewer than 2. Balance knobs are in
+TUNING (`rat*`, `king*`). Non-host peers see monster movement synced ~2×/sec.
+
+## 2026-09-16 — Shop menu + place-in-hand (hotbar removed) — SHIPPED
+Replaced the long bottom build-hotbar with a **Shop panel** (🛒 button in the
+HUD). Everything buyable lives there now: furniture grouped by research tier,
+node mods, doors, and Add Room. Picking an item puts it "in your hands" and
+closes the shop; the bottom bar becomes a slim "Holding: X · Put away" chip.
+You then click a tile to place it, and placement is gated to **interact range**
+(`withinReach`), with every reachable tile shaded blue while you hold something.
+You stay in place mode after each drop (buy/place several in a row); Esc or
+"Put away" clears your hands. Add Room is still instant; furniture/mods/doors are
+place-in-hand. Reach is `interactRange(me)` (base 1, extended by the interact
+trait), so you now have to walk to where you're building.
+
 ## 2026-09-16 — Visible progress bars + mobile + in-game zoom — SHIPPED
 - **Research + soul progress bars** in the HUD (under the chips). `tierProgress`
   and `esoProgress` give fill within the current tier/level; the bar shows the

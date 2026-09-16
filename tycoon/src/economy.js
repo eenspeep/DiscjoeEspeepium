@@ -64,6 +64,11 @@ export const TRAITS = {
 };
 export function traitVal(me, key) { return (me && me.traits && me.traits[key]) || 0; }
 export function interactRange(me) { return TUNING.adjacencyRange + traitVal(me, "interact"); }
+export function withinReach(me, gx, gy) {
+  if (!me || !me.pos) return false;
+  const px = Math.round(me.pos.x), py = Math.round(me.pos.y);
+  return Math.max(Math.abs(px - gx), Math.abs(py - gy)) <= interactRange(me);
+}
 export function buildRange(me) { return TUNING.adjacencyRange + traitVal(me, "buildReach"); }
 export function attackRangeFor(me) { return TUNING.attackRange + 0.5 * traitVal(me, "melee"); }
 export function weaponBonus(me) { return traitVal(me, "weapon"); }
@@ -188,6 +193,9 @@ export const FURNITURE = {
   // Esoteric altars generate personal SOUL for whoever channels (stands) at them.
   altar: { name: "Esoteric Altar", glyph: "🔮", tag: "neutral", tier: 2, unit: 0.3, costUnit: 1.3, h: 14, soul: 1.0 },
   obelisk: { name: "Obsidian Obelisk", glyph: "🗿", tag: "neutral", tier: 6, unit: 0.5, costUnit: 1.6, h: 22, soul: 3.0 },
+  // Rat Motel: no income; every 10 min it spawns (its level) rats. Upgrade it to
+  // spawn more. Rats attack the nearest player or furniture. (See state.monsters.)
+  ratmotel: { name: "Rat Motel", glyph: "🏚️", tag: "neutral", tier: 3, unit: 0, costUnit: 2.2, h: 16, ratSpawner: true },
 };
 export const FURNITURE_ORDER = Object.keys(FURNITURE).sort((a, b) => FURNITURE[a].tier - FURNITURE[b].tier);
 
@@ -196,6 +204,9 @@ export function furnitureValue(f) { const d = FURNITURE[f.type]; return d.unit *
 export function furnitureBaseCost(type) { const d = FURNITURE[type]; return d.costUnit * tierCost(d.tier); }
 export function furnitureBuyCost(shared, type) { return Math.ceil(furnitureBaseCost(type) * Math.pow(1.15, countOfType(shared, type))); }
 export function upgradeCost(f) { return Math.ceil(furnitureBaseCost(f.type) * 0.5 * Math.pow(1.5, f.level - 1)); }
+// A rat-mauled piece is repaired for half the item + half of every upgrade paid.
+export function totalUpgradeSpend(type, level) { let s = 0; for (let L = 1; L < level; L++) s += upgradeCost({ type, level: L }); return s; }
+export function repairCost(f) { return Math.ceil(0.5 * furnitureBaseCost(f.type) + 0.5 * totalUpgradeSpend(f.type, f.level || 1)); }
 export function furnitureTier(type) { return FURNITURE[type].tier; }
 export function furnitureWork(type) { return 6 + (FURNITURE[type].tier - 1) * 8; }
 
@@ -287,7 +298,7 @@ export function nearbyModBonus(me, shared) {
   if (!shared || !shared.furniture || !me.pos) return out;
   const range = interactRange(me);
   for (const [key, f] of Object.entries(shared.furniture)) {
-    if (!f.mods) continue;
+    if (!f.mods || f.broken) continue;
     const [gx, gy] = key.split(",").map(Number);
     if (isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) {
       const b = modBonusOf(f); out.income += b.income; out.research += b.research; out.build += b.build;
@@ -358,6 +369,8 @@ export const ITEMS = {
   knife: { name: "Knife", slot: "weapon", tier: 1, weapon: true, uses: 1, shape: "domino", art: "weapon", glyph: "🔪", color: "#b6bcc6", costUnit: 0.8 },
   machete: { name: "Machete", slot: "weapon", tier: 4, weapon: true, uses: 3, shape: "domino", art: "weapon", glyph: "🗡️", color: "#8a939f", costUnit: 1.4 },
   katana: { name: "Katana", slot: "weapon", tier: 7, weapon: true, uses: 8, shape: "line3", art: "weapon", glyph: "⚔️", color: "#dcdce4", costUnit: 2.1 },
+  // ---- leash: hold it (weapon slot) to recruit a tired rat as a buddy -------
+  leash: { name: "Rat Leash", slot: "weapon", tier: 2, leash: true, shape: "domino", art: "leash", glyph: "🪢", color: "#9a6b3f", costUnit: 1.1 },
   // ---- COMBAT: shields — each absorbs one lethal hit; the lowest-value one breaks
   // first. Tier 1 is torso; every higher tier opens a shield for another slot.
   shield_torso: { name: "Riot Shield", slot: "torso", tier: 1, shield: true, shape: "square", art: "shield", glyph: "🛡️", color: "#54648a", costUnit: 0.9 },
@@ -469,6 +482,18 @@ export function lowestShield(me) {
 }
 export function shieldCount(me) { return equippedShields(me).length; }
 
+// ---- pet rat (leash) ------------------------------------------------------
+// A leash in the weapon slot lets you recruit one tired rat. The rat rides in
+// me.pet and stays as long as the leash is in hand (put the leash away or swap
+// to a weapon and the rat wanders off). It boosts soul channeling and eats one
+// hit before your shields.
+export function hasLeash(me) {
+  const uid = me && me.equipment && me.equipment.weapon, inst = uid && me.items[uid], def = inst && ITEMS[inst.type];
+  return !!(def && def.leash);
+}
+export function petActive(me) { return !!(me && me.pet && hasLeash(me)); }
+export function petSoulMult(me) { return petActive(me) ? TUNING.petSoulMult : 1; }
+
 // ---- income + effects -----------------------------------------------------
 
 export function statScales(me) {
@@ -510,6 +535,7 @@ export function income(me, shared, { passiveOnly = false } = {}) {
   if (!passiveOnly && shared && shared.furniture && me.pos) {
     const range = interactRange(me);
     for (const [key, f] of Object.entries(shared.furniture)) {
+      if (f.broken) continue;   // rat-mauled furniture pays nothing until repaired
       const [gx, gy] = key.split(",").map(Number);
       if (isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) {
         flat += scaleByTag(furnitureValue(f), FURNITURE[f.type].tag, sc);
@@ -618,6 +644,7 @@ export function rpRate(me, shared) {
   const brain = (me.stats && me.stats.brain) || 0, range = interactRange(me);
   let rp = 0;
   for (const [key, f] of Object.entries(shared.furniture)) {
+    if (f.broken) continue;
     const [gx, gy] = key.split(",").map(Number);
     const def = FURNITURE[f.type];
     if (!isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) continue;
@@ -696,6 +723,7 @@ export function soulRate(me, shared) {
   if (!shared || !shared.furniture || !me.pos) return 0;
   let base = 0; const range = interactRange(me);
   for (const [key, f] of Object.entries(shared.furniture)) {
+    if (f.broken) continue;
     const [gx, gy] = key.split(",").map(Number);
     const def = FURNITURE[f.type];
     if (def.soul && isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) base += def.soul * (1 + 0.5 * (f.level - 1));
@@ -703,6 +731,7 @@ export function soulRate(me, shared) {
   if (base <= 0) return 0;
   let mult = 1 + 0.2 * traitVal(me, "pray");   // "Praying speed" trait
   for (const d of equippedDefs(me)) if (d.soulBonus) mult += d.soulBonus;
+  mult *= petSoulMult(me);                      // a leashed rat buddy boosts channeling
   return Math.round(base * TUNING.soulScale * mult * ((me && me.soulMult) || 1) * 100) / 100;
 }
 
