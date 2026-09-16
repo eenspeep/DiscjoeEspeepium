@@ -6,8 +6,9 @@ These are the source of truth for planned work; read this before picking up
 
 ## 2026-09-16 — Rats + Rat King (monsters) — SHIPPED
 Monsters live in `shared.monsters`, host-simulated (`monsterTick`). They walk to
-the nearest player or furniture and attack once/sec, tiring (despawning) after 3
-attacks. Furniture hit goes **broken** (grays out, earns nothing, ⚠️) until
+the nearest player or furniture and attack once/sec. After 3 attacks a rat
+**tires**: it stops attacking, shows a spinning 💫, and wanders slowly (it does
+not despawn — you can still kill it). Furniture hit goes **broken** (grays out, earns nothing, ⚠️) until
 repaired for `repairCost` = ½ base + ½ of every upgrade paid. A player hit loses
 their lowest shield, or dies if unarmored (relayed to remote peers via a
 `monsterHit` message, same trust model as PvP). Rats can't attack doors and are

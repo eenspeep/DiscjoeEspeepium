@@ -750,6 +750,20 @@ function monsterTargets() {
   return out;
 }
 function lockedDoorAt(s, x, y) { const d = s.doors && s.doors[x + "," + y]; return !!(d && d.locked); }
+// A tired rat wanders slowly to random nearby tiles instead of hunting.
+function wanderMonster(m, dt) {
+  const s = state.shared;
+  if (!m.wt || Math.hypot(m.wt.x - m.x, m.wt.y - m.y) < 0.35 || Math.random() < 0.01) {
+    const px = Math.round(m.x), py = Math.round(m.y);
+    for (let i = 0; i < 8; i++) { const x = px + (Math.floor(Math.random() * 5) - 2), y = py + (Math.floor(Math.random() * 5) - 2); if (isWalkable(s, x, y) && !lockedDoorAt(s, x, y)) { m.wt = { x, y }; break; } }
+  }
+  if (m.wt) {
+    const step = TUNING.ratSpeed * 0.3 * dt, ddx = m.wt.x - m.x, ddy = m.wt.y - m.y, d = Math.hypot(ddx, ddy) || 1;
+    const nx = m.x + (ddx / d) * step, ny = m.y + (ddy / d) * step, rx = Math.round(nx), ry = Math.round(ny);
+    if (isWalkable(s, rx, ry) && !lockedDoorAt(s, rx, ry)) { m.x = nx; m.y = ny; }
+  }
+  state.dirty = true;
+}
 function monsterAttack(m, tg) {
   const s = state.shared, king = m.kind === "king";
   if (tg.type === "furn") { const f = s.furniture[tg.key]; if (f) f.broken = true; }
@@ -778,17 +792,18 @@ function monsterTick(t) {
   const mons = monsterList(); if (!mons.length) return;
   const targets = monsterTargets();
   for (const m of mons) {
+    if (m.tired) { wanderMonster(m, dt); continue; }   // spent rats just amble around
     let best = null, bd = Infinity;
     for (const tg of targets) { const d = Math.hypot(tg.x - m.x, tg.y - m.y); if (d < bd) { bd = d; best = tg; } }
     if (!best) continue;
     if (bd > 1.25) {
       const step = TUNING.ratSpeed * dt, ddx = best.x - m.x, ddy = best.y - m.y, dist = Math.hypot(ddx, ddy) || 1;
       const nx = m.x + (ddx / dist) * step, ny = m.y + (ddy / dist) * step, rx = Math.round(nx), ry = Math.round(ny);
-      if (isWalkable(s, rx, ry) && !lockedDoorAt(s, rx, ry)) { m.x = nx; m.y = ny; } else { m.x = m.x + (ddx / dist) * step * 0.0; }   // blocked (locked door): hold
+      if (isWalkable(s, rx, ry) && !lockedDoorAt(s, rx, ry)) { m.x = nx; m.y = ny; }   // else blocked (locked door): hold
       state.dirty = true;
     } else if (t - (m.cool || 0) >= TUNING.ratAttackMs) {
       m.cool = t; monsterAttack(m, best); m.attacks = (m.attacks || 0) + 1;
-      if (m.kind === "rat" && m.attacks >= TUNING.ratAttacks) delete s.monsters[m.id];   // tired out
+      if (m.kind === "rat" && m.attacks >= TUNING.ratAttacks) { m.tired = true; m.wt = null; }   // tired out, stops attacking
       state.dirty = true;
     }
   }

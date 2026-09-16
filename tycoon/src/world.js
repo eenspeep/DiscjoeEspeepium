@@ -339,7 +339,7 @@ function updateMonsters(dt) {
     if (!r) { r = { x: m.x, y: m.y }; renderMons.set(id, r); }
     r.x = lerp(r.x, m.x, clamp(dt * 8, 0, 1));
     r.y = lerp(r.y, m.y, clamp(dt * 8, 0, 1));
-    r.kind = m.kind; r.armor = m.armor; r.guard = m.guard;
+    r.kind = m.kind; r.armor = m.armor; r.guard = m.guard; r.tired = m.tired;
   }
   for (const id of renderMons.keys()) if (!live.has(id)) renderMons.delete(id);
 }
@@ -456,8 +456,15 @@ function drawMonster(r) {
   const p = project(r.x, r.y, canvas), zoom = camera.zoom, king = r.kind === "king";
   ctx.save(); ctx.scale(1, 0.5); ctx.beginPath(); ctx.arc(p.x, (p.y + 4 * zoom) / 0.5, (king ? 12 : 7) * zoom, 0, 7); ctx.fillStyle = "rgba(0,0,0,0.18)"; ctx.fill(); ctx.restore();
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.globalAlpha = r.tired ? 0.7 : 1;
   ctx.font = `${(king ? 30 : 17) * zoom}px system-ui, sans-serif`;
   ctx.fillText("🐀", p.x, p.y - (king ? 8 : 5) * zoom);
+  ctx.globalAlpha = 1;
+  if (r.tired) {   // spinning "tired" spiral above the head
+    const spin = (now() / 500) % (Math.PI * 2);
+    ctx.save(); ctx.translate(p.x, p.y - 18 * zoom); ctx.rotate(spin);
+    ctx.font = `${12 * zoom}px system-ui, sans-serif`; ctx.fillText("💫", 0, 0); ctx.restore();
+  }
   if (king) {
     ctx.font = `${16 * zoom}px system-ui, sans-serif`; ctx.fillText("👑", p.x, p.y - 26 * zoom);
     ctx.font = `${10 * zoom}px "Fredoka", system-ui, sans-serif`; ctx.fillStyle = "#b04a4a"; ctx.fillText("♥ " + r.guard, p.x, p.y + 6 * zoom);
