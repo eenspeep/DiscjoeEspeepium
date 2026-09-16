@@ -15,11 +15,12 @@ export const SUPABASE = {
 };
 
 // Everyone using the same room shares one office, furniture, and team pot.
-export const ROOM = "joetime-01";
+// Bumped to -02 to abandon the test-scarred shared room and start fresh.
+export const ROOM = "joetime-02";
 
 // Per-browser save key. Bump the suffix to force a clean slate on a breaking
-// change to the personal save shape.
-export const ME_KEY = "joetime:me:v2";
+// change to the personal save shape (or to wipe test junk). v3 = post-combat reset.
+export const ME_KEY = "joetime:me:v3";
 
 // Economy + world tunables. Pure numbers, safe to tweak.
 export const TUNING = {
