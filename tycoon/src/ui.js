@@ -5,13 +5,14 @@ import { el, fmt, clamp } from "./util.js";
 import { TUNING } from "./config.js";
 import {
   state, onChange, income$, createJoey,
-  tryUpgradeFurniture, trySellFurniture, tryExpandFloor, investPot, votePot, setLook,
+  tryUpgradeFurniture, trySellFurniture, tryAddRoom, investPot, votePot, setLook,
   tryBuyItem, equipItem, unequipItem, moveItem, rotateItem, trySellItem,
   cancelSite, cancelBuild,
+  tryLockDoor, tryUnlockDoor, tryRemoveDoor, checkDoorPassword,
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
-  expandCost, canExpand, statScales, SPECIALTIES, ADJECTIVES, adjSummary, STATS,
+  roomCost, canAddRoom, statScales, SPECIALTIES, ADJECTIVES, adjSummary, STATS,
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
   furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
@@ -20,7 +21,7 @@ import {
   MODS, MOD_ORDER, modPrice, isModUnlocked,
 } from "./economy.js";
 import { BASE_LOOK, drawJoey, defaultLook } from "./appearance.js";
-import { setBuild, getBuild, setBuildMod, getBuildMod, setSelected } from "./world.js";
+import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setSelected, unlockDoorLocal } from "./world.js";
 
 let hud, buildbar, panel, toast;
 let openKey = null, openView = null;
@@ -73,6 +74,7 @@ function refresh() {
   else if (openView === "locker") renderLocker();
   else if (openView === "pot") renderPot();
   else if (openView === "site") renderSite();
+  else if (openView === "door") renderDoor();
 }
 
 // ---- HUD ------------------------------------------------------------------
@@ -123,9 +125,14 @@ function renderBuildbar() {
     return el("button", { class: "build-btn " + (TAG_CLASS[def.tag] || "") + (active === type ? " active" : "") + (afford ? "" : " poor"), title: def.name + " (T" + def.tier + ") — " + (def.soul ? "channel SOUL here · " : "") + def.tag.toUpperCase() + ", +" + fmt(val) + "/s adjacent · " + furnitureWork(type) + " work", onclick: () => selectBuild(type) },
       [el("span", { class: "b-glyph", text: def.glyph }), el("span", { class: "b-name", text: def.name }), el("span", { class: "b-cost", text: fmt(cost) })]);
   });
-  const expand = canExpand(s)
-    ? el("button", { class: "build-btn expand" + (state.me.credits >= expandCost(s) ? "" : " poor"), title: "Grow the floor", onclick: () => { const r = tryExpandFloor(); flash(r.ok ? "The office grew." : (r.why || "Can't expand.")); } }, [el("span", { class: "b-glyph", text: "➕" }), el("span", { class: "b-name", text: "Expand" }), el("span", { class: "b-cost", text: fmt(expandCost(s)) })])
+  const addRoom = canAddRoom(s)
+    ? el("button", { class: "build-btn expand" + (state.me.credits >= roomCost(s) ? "" : " poor"), title: "Add a side room joined by a hallway", onclick: () => { const r = tryAddRoom(); flash(r.ok ? "New room added down the hall." : (r.why || "Can't add a room.")); } }, [el("span", { class: "b-glyph", text: "➕" }), el("span", { class: "b-name", text: "Add Room" }), el("span", { class: "b-cost", text: fmt(roomCost(s)) })])
     : el("button", { class: "build-btn expand disabled" }, [el("span", { class: "b-glyph", text: "🏢" }), el("span", { class: "b-name", text: "Max" })]);
+  const doorReady = currentTier(s) >= TUNING.doorTier;
+  const activeDoor = getBuildDoor();
+  const door = doorReady
+    ? el("button", { class: "build-btn door" + (activeDoor ? " active" : "") + (me.credits >= TUNING.doorCost ? "" : " poor"), title: "Install a door in a hallway (password-lock it later)", onclick: () => selectDoor() }, [el("span", { class: "b-glyph", text: "🚪" }), el("span", { class: "b-name", text: "Door" }), el("span", { class: "b-cost", text: fmt(TUNING.doorCost) })])
+    : el("button", { class: "build-btn door locked", title: "Doors unlock at research Tier " + TUNING.doorTier, onclick: () => flash("Doors unlock at research Tier " + TUNING.doorTier + ". Keep researching with BRAIN furniture.") }, [el("span", { class: "b-glyph", text: "🔒" }), el("span", { class: "b-name", text: "Door" }), el("span", { class: "b-cost", text: "T" + TUNING.doorTier })]);
   const nt = nextTier(s);
   const teaser = nt ? el("button", { class: "build-btn locked", title: "Research " + (nt.need - nt.have) + " more to unlock Tier " + nt.tier, onclick: () => flash("Next: Tier " + nt.tier + " " + nt.name + " — " + nt.have + "/" + nt.need + " research. Stand at BRAIN furniture.") },
     [el("span", { class: "b-glyph", text: "🔒" }), el("span", { class: "b-name", text: "Tier " + nt.tier }), el("span", { class: "b-cost", text: "🔬" })]) : null;
@@ -137,10 +144,11 @@ function renderBuildbar() {
   });
   const modSep = modBtns.length ? [el("span", { class: "build-sep", text: "Mods" })] : [];
 
-  buildbar.replaceChildren(cursor, ...btns, ...modSep, ...modBtns, expand, ...(teaser ? [teaser] : []));
+  buildbar.replaceChildren(cursor, ...btns, ...modSep, ...modBtns, addRoom, door, ...(teaser ? [teaser] : []));
 }
 function selectBuild(type) { setBuild(getBuild() === type ? null : type); if (getBuild()) flash("Click a floor tile to place your " + FURNITURE[getBuild()].name + " · R to rotate."); renderBuildbar(); }
 function selectMod(type) { setBuildMod(getBuildMod() === type ? null : type); if (getBuildMod()) flash("Click a surface tile of a desk/table to mount the " + MODS[getBuildMod()].name + "."); renderBuildbar(); }
+function selectDoor() { setBuildDoor(!getBuildDoor()); if (getBuildDoor()) flash("Click a hallway tile to install a door."); renderBuildbar(); }
 
 // ---- furniture inspector --------------------------------------------------
 
@@ -175,6 +183,34 @@ function renderSite() {
     stat("Progress", pct + "%"), stat("Builders so far", String(builders)), stat("Work", Math.floor(siteProgress(site)) + " / " + site.work),
     el("div", { class: "panel-actions" }, [el("button", { class: "btn", onclick: () => { const r = cancelSite(openKey); flash(r.ok ? "Build cancelled, refunded " + fmt(r.refund) + "." : "Can't cancel."); closePanel(); } }, ["Cancel build"])])
   );
+}
+
+// ---- door inspector -------------------------------------------------------
+
+let doorPwDraft = "";
+export function openDoor(key, door) { openKey = key; openView = "door"; doorPwDraft = ""; setSelected(null); setBuild(null); setBuildMod(null); setBuildDoor(false); renderBuildbar(); renderDoor(); showPanel(); }
+function renderDoor() {
+  const d = state.shared.doors[openKey]; if (!d) return closePanel();
+  const mine = d.by === state.me.id;
+  const kids = [panelHeader((d.locked ? "🔒" : "🚪") + " Door")];
+  const pw = el("input", { class: "name-input", type: "password", placeholder: "password", value: doorPwDraft, oninput: (e) => { doorPwDraft = e.target.value; } });
+
+  if (mine) {
+    kids.push(el("p", { class: "muted small", text: d.locked ? "Locked. Only you and anyone with the password can pass. Unlock it for free, or remove it." : "Yours. Set a password to lock it — a lock costs " + fmt(TUNING.lockCost) + "." }));
+    kids.push(el("label", { class: "field" }, [el("span", { class: "field-label", text: d.locked ? "New password (re-lock)" : "Password" }), pw]));
+    const acts = [];
+    acts.push(el("button", { class: "btn primary" + (state.me.credits >= TUNING.lockCost ? "" : " poor"), onclick: () => { const r = tryLockDoor(openKey, doorPwDraft); flash(r.ok ? "Door locked." : (r.why || "Can't lock.")); if (r.ok) { doorPwDraft = ""; renderDoor(); } } }, [d.locked ? "Re-lock — " + fmt(TUNING.lockCost) : "Lock — " + fmt(TUNING.lockCost)]));
+    if (d.locked) acts.push(el("button", { class: "btn", onclick: () => { const r = tryUnlockDoor(openKey); flash(r.ok ? "Door unlocked." : (r.why || "Can't unlock.")); renderDoor(); } }, ["Unlock"]));
+    acts.push(el("button", { class: "btn", onclick: () => { const r = tryRemoveDoor(openKey); flash(r.ok ? "Door removed (+" + fmt(r.refund) + ")." : (r.why || "Can't remove.")); closePanel(); } }, ["Remove door"]));
+    kids.push(el("div", { class: "panel-actions" }, acts));
+  } else if (!d.locked) {
+    kids.push(el("p", { class: "muted small", text: "This door is unlocked — walk right through it." }));
+  } else {
+    kids.push(el("p", { class: "muted small", text: "Locked by someone else. Enter the password to open it for this session." }));
+    kids.push(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Password" }), pw]));
+    kids.push(el("div", { class: "panel-actions" }, [el("button", { class: "btn primary", onclick: () => { if (checkDoorPassword(openKey, doorPwDraft)) { unlockDoorLocal(openKey); flash("Unlocked! You can pass now."); closePanel(); } else flash("Wrong password."); } }, ["Open"])]));
+  }
+  panel.replaceChildren(...kids);
 }
 
 // ---- Locker: account + equipment + bag + shop -----------------------------

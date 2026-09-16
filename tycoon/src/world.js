@@ -7,19 +7,24 @@ import { drawJoey, lookFromSeed, shade } from "./appearance.js";
 import {
   FURNITURE, MODS, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isNearFootprint,
   footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt, hasSurface,
+  walkableSet, isWalkable, inHall, doorPassable,
 } from "./economy.js";
 import { TUNING } from "./config.js";
-import { clamp, lerp, now } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod } from "./state.js";
+import { clamp, lerp, now, hash } from "./util.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
 let buildMod = null;    // node-mod type being placed
+let buildDoor = false;  // placing a door
 let buildRot = 0;       // rotation (0..3) for furniture placement
 let onFurnitureClick = () => {};
 let onSiteClick = () => {};
+let onDoorClick = () => {};
 let onTileMessage = () => {};
 let sendMsg = null;
+const unlockedDoors = new Set();   // doors I've unlocked this session
+export function unlockDoorLocal(key) { unlockedDoors.add(key); }
 const keys = new Set();
 let mouse = { sx: 0, sy: 0, gx: 0, gy: 0, over: false };
 let target = null;
@@ -34,6 +39,7 @@ export function initWorld(canvasEl, hooks = {}) {
   ctx = canvas.getContext("2d");
   onFurnitureClick = hooks.onFurnitureClick || onFurnitureClick;
   onSiteClick = hooks.onSiteClick || onSiteClick;
+  onDoorClick = hooks.onDoorClick || onDoorClick;
   onTileMessage = hooks.onTileMessage || onTileMessage;
   sendMsg = hooks.send || null;
 
@@ -66,10 +72,12 @@ export function initWorld(canvasEl, hooks = {}) {
   requestAnimationFrame(loop);
 }
 
-export function setBuild(type) { buildType = type; buildMod = null; }
+export function setBuild(type) { buildType = type; buildMod = null; buildDoor = false; }
 export function getBuild() { return buildType; }
-export function setBuildMod(type) { buildMod = type; buildType = null; }
+export function setBuildMod(type) { buildMod = type; buildType = null; buildDoor = false; }
 export function getBuildMod() { return buildMod; }
+export function setBuildDoor(on) { buildDoor = on; buildType = null; buildMod = null; }
+export function getBuildDoor() { return buildDoor; }
 export function setSelected(key) { selectedKey = key; }
 
 function resize() {
@@ -83,6 +91,13 @@ function onClick() {
   const gx = mouse.gx, gy = mouse.gy;
   const fKey = furnitureAnchorAt(state.shared, gx, gy);
   const sKey = siteAnchorAt(state.shared, gx, gy);
+  const doorKey = gx + "," + gy;
+  if (buildDoor) {
+    const r = tryPlaceDoor(gx, gy);
+    onTileMessage(r.ok ? "Door installed. Click it to lock it." : (r.why || "Can't place a door there."));
+    return;
+  }
+  if (state.shared.doors[doorKey]) { onDoorClick(doorKey, state.shared.doors[doorKey]); return; }
   if (buildMod) {
     const f = fKey && state.shared.furniture[fKey];
     if (!f) return onTileMessage("Put mods on a furniture surface.");
@@ -101,7 +116,7 @@ function onClick() {
   }
   if (fKey) { onFurnitureClick(fKey, state.shared.furniture[fKey]); return; }
   if (sKey) { onSiteClick(sKey, state.shared.sites[sKey]); return; }
-  if (inBounds(gx, gy)) target = { x: gx, y: gy };
+  if (isWalkable(state.shared, gx, gy)) target = { x: gx, y: gy };
 }
 
 // Shove the nearest adjacent person one tile away. Works locally on bots; sends
@@ -118,9 +133,10 @@ function doPush() {
   const sx = Math.abs(dx) >= Math.abs(dy) ? Math.sign(dx) || 1 : 0;
   const sy = Math.abs(dy) > Math.abs(dx) ? Math.sign(dy) : 0;
   const tx = Math.round(best.x) + sx, ty = Math.round(best.y) + sy;
-  const f = state.shared.floor;
-  if (tx < 0 || ty < 0 || tx >= f.w || ty >= f.h) return onTileMessage("Nowhere to shove them.");
+  if (!isWalkable(state.shared, tx, ty)) return onTileMessage("Nowhere to shove them.");
   if (blockedTiles(state.shared).has(tx + "," + ty)) return onTileMessage("Something's in the way.");
+  const door = state.shared.doors[tx + "," + ty];
+  if (door && door.locked && !doorPassable(door, tx + "," + ty, state.me.id, unlockedDoors)) return onTileMessage("A locked door's in the way.");
   if (best.kind === "npc") { best.ref.x = tx; best.ref.y = ty; best.ref.target = null; best.ref.pause = 0.6; }
   else if (sendMsg) sendMsg({ type: "push", to: best.id, x: tx, y: ty });
   onTileMessage("Shoved " + (best.name || "them") + "!");
@@ -130,8 +146,8 @@ function doPush() {
 export function applyPush(x, y) {
   if (!state.me || !state.me.created) return;
   const f = state.shared.floor;
-  state.me.pos.x = clamp(x, 0, f.w - 1);
-  state.me.pos.y = clamp(y, 0, f.h - 1);
+  state.me.pos.x = clamp(x, f.x, f.x + f.w - 1);
+  state.me.pos.y = clamp(y, f.y, f.y + f.h - 1);
   target = null;
 }
 
@@ -162,13 +178,19 @@ function updateMe(dt) {
     else { const step = Math.min(dist, speed * dt); vx = (ddx / dist) * step; vy = (ddy / dist) * step; want = true; }
   }
 
-  const f = state.shared.floor, blocked = blockedTiles(state.shared), ents = entityTileSet();
-  const solid = (gx, gy) => gx < 0 || gy < 0 || gx >= f.w || gy >= f.h || blocked.has(gx + "," + gy) || ents.has(gx + "," + gy);
+  const f = state.shared.floor, walk = walkableSet(state.shared), blocked = blockedTiles(state.shared), ents = entityTileSet();
+  const doors = state.shared.doors || {};
+  const solid = (gx, gy) => {
+    const k = gx + "," + gy;
+    if (!walk.has(k) || blocked.has(k) || ents.has(k)) return true;
+    const d = doors[k];
+    return !!(d && !doorPassable(d, k, state.me.id, unlockedDoors));
+  };
   let nx = me.pos.x + vx, ny = me.pos.y + vy, movedX = vx !== 0, movedY = vy !== 0;
   if (vx !== 0 && solid(Math.round(nx), Math.round(me.pos.y))) { nx = me.pos.x; movedX = false; }
   if (vy !== 0 && solid(Math.round(nx), Math.round(ny))) { ny = me.pos.y; movedY = false; }
-  me.pos.x = clamp(nx, 0, f.w - 1);
-  me.pos.y = clamp(ny, 0, f.h - 1);
+  me.pos.x = clamp(nx, f.x, f.x + f.w - 1);
+  me.pos.y = clamp(ny, f.y, f.y + f.h - 1);
   if (target && !movedX && !movedY) target = null; // stuck against something
   me.moving = want && (movedX || movedY);
 }
@@ -188,14 +210,16 @@ function updatePeers(dt) {
 }
 
 function updateNPCs(dt) {
-  const f = state.shared.floor, blocked = blockedTiles(state.shared);
-  const solid = (gx, gy) => gx < 0 || gy < 0 || gx >= f.w || gy >= f.h || blocked.has(gx + "," + gy);
+  const s = state.shared, walk = walkableSet(s), blocked = blockedTiles(s), doors = s.doors || {};
+  const solid = (gx, gy) => { const k = gx + "," + gy; if (!walk.has(k) || blocked.has(k)) return true; const d = doors[k]; return !!(d && d.locked); };
+  let walkList = null;
+  const pick = () => { if (!walkList) walkList = [...walk].map((k) => k.split(",").map(Number)).filter(([x, y]) => !solid(x, y)); return walkList.length ? walkList[Math.floor(Math.random() * walkList.length)] : null; };
   for (const n of npcs) {
     n.pause -= dt;
-    if (!n.target && n.pause <= 0) n.target = { x: Math.round(Math.random() * (f.w - 1)), y: Math.round(Math.random() * (f.h - 1)) };
+    if (!n.target && n.pause <= 0) { const t = pick(); if (t) n.target = { x: t[0], y: t[1] }; }
     if (n.target && n.pause <= 0) {
       const ddx = n.target.x - n.x, ddy = n.target.y - n.y, dist = Math.hypot(ddx, ddy);
-      if (dist < 0.1) { n.target = null; n.pause = 1 + Math.random() * 4; n.moving = false; }
+      if (dist < 0.15) { n.target = null; n.pause = 1 + Math.random() * 4; n.moving = false; }
       else {
         const step = Math.min(dist, TUNING.walkSpeed * 0.7 * dt);
         let nx = n.x + (ddx / dist) * step, ny = n.y + (ddy / dist) * step, stuck = false;
@@ -205,7 +229,6 @@ function updateNPCs(dt) {
         if (stuck) { n.target = null; n.pause = 0.5 + Math.random() * 2; }
       }
     }
-    n.x = clamp(n.x, 0, f.w - 1); n.y = clamp(n.y, 0, f.h - 1);
   }
 }
 
@@ -239,15 +262,22 @@ function draw(t) {
   const s = state.shared;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  for (let gy = 0; gy < s.floor.h; gy++)
-    for (let gx = 0; gx < s.floor.w; gx++)
-      drawTile(gx, gy, (gx + gy) % 2 === 0 ? "#e9edf3" : "#dfe4ec");
+  // floor = only walkable tiles (rooms + hallways), sorted back-to-front so the
+  // low back walls we extrude never cover a tile in front of them.
+  const walk = walkableSet(s);
+  const floorCells = [...walk].map((k) => k.split(",").map(Number)).sort((a, b) => (a[0] + a[1]) - (b[0] + b[1]));
+  for (const [gx, gy] of floorCells) {
+    const even = (gx + gy) % 2 === 0;
+    const fill = inHall(s, gx, gy) ? (even ? "#d8dce6" : "#ced3df") : (even ? "#e9edf3" : "#dfe4ec");
+    drawTile(gx, gy, fill);
+  }
+  for (const [gx, gy] of floorCells) drawBackWalls(s, gx, gy, walk);
 
   if (mouse.over && state.me.created) {
     if (buildType) {
       const blocked = blockedTiles(s);
       for (const [cx, cy] of footprintCells(buildType, mouse.gx, mouse.gy, buildRot)) {
-        const ok = inBounds(cx, cy) && !blocked.has(cx + "," + cy);
+        const ok = isWalkable(s, cx, cy) && !blocked.has(cx + "," + cy) && !s.doors[cx + "," + cy];
         drawTile(cx, cy, ok ? "rgba(70,190,120,0.55)" : "rgba(230,80,70,0.5)");
       }
     } else if (buildMod) {
@@ -255,7 +285,10 @@ function draw(t) {
       const f = fKey && s.furniture[fKey];
       const ok = f && hasSurface(f.type) && !(f.mods && f.mods[mouse.gx + "," + mouse.gy]);
       if (inBounds(mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(150,90,220,0.6)" : "rgba(230,80,70,0.45)");
-    } else if (inBounds(mouse.gx, mouse.gy)) {
+    } else if (buildDoor) {
+      const ok = inHall(s, mouse.gx, mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !s.furniture[mouse.gx + "," + mouse.gy] && !s.sites[mouse.gx + "," + mouse.gy];
+      if (isWalkable(s, mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(90,160,240,0.55)" : "rgba(230,80,70,0.45)");
+    } else if (isWalkable(s, mouse.gx, mouse.gy)) {
       drawTile(mouse.gx, mouse.gy, "rgba(90,120,220,0.35)");
     }
   }
@@ -271,6 +304,10 @@ function draw(t) {
     const [ax, ay] = key.split(",").map(Number);
     items.push({ depth: cellsDepth(footprintCells(site.type, ax, ay, site.rot || 0)), kind: "site", ax, ay, site, key });
   }
+  for (const [key, d] of Object.entries(s.doors || {})) {
+    const [dx, dy] = key.split(",").map(Number);
+    items.push({ depth: dx + dy - 0.05, kind: "door", dx, dy, d, key });
+  }
   items.push({ depth: state.me.pos.x + state.me.pos.y, kind: "me" });
   for (const [, r] of renderPeers) items.push({ depth: r.x + r.y, kind: "peer", r });
   for (const n of npcs) items.push({ depth: n.x + n.y, kind: "npc", n });
@@ -279,10 +316,44 @@ function draw(t) {
   for (const it of items) {
     if (it.kind === "furn") drawFurniture(it.ax, it.ay, it.f, it.key === selectedKey, inUse.has(it.key));
     else if (it.kind === "site") drawSite(it.ax, it.ay, it.site);
+    else if (it.kind === "door") drawDoor(it.dx, it.dy, it.d);
     else if (it.kind === "me") drawMe(t);
     else if (it.kind === "peer") drawPeer(it.r, t);
     else if (it.kind === "npc") drawPeer(it.n, t, true);
   }
+}
+
+// Low back walls: extrude the two "up-screen" edges of a walkable tile wherever
+// the neighbor across that edge is void, so rooms read as enclosed.
+function drawBackWalls(s, gx, gy, walk) {
+  const WZ = 15 * camera.zoom;
+  const c = tileCorners(gx, gy);
+  const up = (x, y) => ({ x: x, y: y - WZ });
+  ctx.strokeStyle = "rgba(120,130,150,0.3)"; ctx.lineWidth = 1;
+  if (!walk.has((gx - 1) + "," + gy)) { ctx.fillStyle = "#c3c9d6"; quad(c.L, c.T, up(c.T.x, c.T.y), up(c.L.x, c.L.y)); ctx.stroke(); }
+  if (!walk.has(gx + "," + (gy - 1))) { ctx.fillStyle = "#cdd3df"; quad(c.T, c.R, up(c.R.x, c.R.y), up(c.T.x, c.T.y)); ctx.stroke(); }
+}
+
+function drawDoor(gx, gy, d) {
+  const s = state.shared, key = gx + "," + gy, c = tileCorners(gx, gy);
+  const open = doorPassable(d, key, state.me.id, unlockedDoors);
+  const z = 24 * camera.zoom;
+  const horiz = isWalkable(s, gx - 1, gy) && isWalkable(s, gx + 1, gy);
+  const a = horiz ? c.T : c.L, b = horiz ? c.B : c.R;   // slab spans the corridor
+  const frame = d.locked ? (open ? "#5b86c9" : "#b04a4a") : "#7c8698";
+  const pw = 3.5 * camera.zoom;
+  ctx.fillStyle = shade(frame, -22);
+  ctx.fillRect(a.x - pw / 2, a.y - z, pw, z);
+  ctx.fillRect(b.x - pw / 2, b.y - z, pw, z);
+  ctx.fillStyle = frame;   // lintel
+  quad({ x: a.x, y: a.y - z }, { x: b.x, y: b.y - z }, { x: b.x, y: b.y - z + 4 * camera.zoom }, { x: a.x, y: a.y - z + 4 * camera.zoom });
+  ctx.globalAlpha = (d.locked && !open) ? 0.85 : (d.locked ? 0.22 : 0.4);   // slab
+  ctx.fillStyle = frame;
+  quad(a, b, { x: b.x, y: b.y - z }, { x: a.x, y: a.y - z });
+  ctx.globalAlpha = 1;
+  const mid = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - z * 0.62 };
+  ctx.font = `${13 * camera.zoom}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(d.locked ? (open ? "🔓" : "🔒") : "🚪", mid.x, mid.y);
 }
 
 function tileCorners(gx, gy) {

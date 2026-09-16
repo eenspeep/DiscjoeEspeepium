@@ -3,10 +3,11 @@
 // furniture, team pot) syncs through the net adapter.
 
 import { TUNING, ME_KEY } from "./config.js";
-import { now, uid, clamp } from "./util.js";
+import { now, uid, clamp, hash } from "./util.js";
 import { defaultLook } from "./appearance.js";
 import {
-  income, FURNITURE, furnitureBuyCost, upgradeCost, expandCost, canExpand,
+  income, FURNITURE, furnitureBuyCost, upgradeCost,
+  roomCost, canAddRoom, nextRoom, floorBounds, isWalkable, inHall,
   buildStats, SPECIALTIES, ADJECTIVES,
   ITEMS, ITEM_SLOTS, firstFit, fitsAt, itemCells, bagGrid,
   weekStartFor, everyoneVoted, tallyVotes, proposalById, PROPOSALS,
@@ -129,18 +130,18 @@ function entityTiles() {
   return s;
 }
 function freeTileNear(gx, gy) {
-  const s = state.shared, f = s.floor, blocked = blockedTiles(s);
-  const inB = (x, y) => x >= 0 && y >= 0 && x < f.w && y < f.h;
-  if (inB(gx, gy) && !blocked.has(gx + "," + gy)) return { x: gx, y: gy };
-  for (let r = 1; r < Math.max(f.w, f.h) + 1; r++)
+  const s = state.shared, blocked = blockedTiles(s);
+  const ok = (x, y) => isWalkable(s, x, y) && !blocked.has(x + "," + y) && !(s.doors && s.doors[x + "," + y]);
+  if (ok(gx, gy)) return { x: gx, y: gy };
+  for (let r = 1; r < 60; r++)
     for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
       if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
       const x = gx + dx, y = gy + dy;
-      if (inB(x, y) && !blocked.has(x + "," + y)) return { x, y };
+      if (ok(x, y)) return { x, y };
     }
   return { x: gx, y: gy };
 }
-function centerMe() { const f = state.shared.floor; state.me.pos = freeTileNear(Math.floor((f.w - 1) / 2), Math.floor((f.h - 1) / 2)); }
+function centerMe() { const r0 = state.shared.rooms[0]; state.me.pos = freeTileNear(r0.x + Math.floor(r0.w / 2), r0.y + Math.floor(r0.h / 2)); }
 
 // ---- shared ---------------------------------------------------------------
 
@@ -152,14 +153,17 @@ function defaultShared() {
   furniture[`${cx},${cy}`] = { type: "chair", level: 1, by: [] };
   furniture[`${cx + 1},${cy}`] = { type: "workbench", level: 1, by: [] };
   furniture[`${cx},${cy + 1}`] = { type: "snacktable", level: 1, by: [] };
-  return { floor: { w, h }, furniture, sites: {}, research: { contrib: {} }, pot: defaultPot() };
+  return { rooms: [{ x: 0, y: 0, w, h }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, sites: {}, research: { contrib: {} }, pot: defaultPot() };
 }
 function healShared(s) {
-  if (!s.floor) s.floor = { ...TUNING.startFloor };
+  if (!s.rooms) { const w = (s.floor && s.floor.w) || 9, h = (s.floor && s.floor.h) || 9; s.rooms = [{ x: 0, y: 0, w, h }]; }
+  if (!s.halls) s.halls = [];
+  if (!s.doors) s.doors = {};
   if (!s.furniture) s.furniture = {};
   if (!s.sites) s.sites = {};
   if (!s.research) s.research = { contrib: {} };
   if (!s.research.contrib) s.research.contrib = {};
+  s.floor = floorBounds(s);
   s.pot = s.pot ? { ...defaultPot(), ...s.pot } : defaultPot();
   return s;
 }
@@ -175,8 +179,10 @@ export async function initState(net) {
 
   if (state.me.created) {
     if (!state.me.pos || state.me.pos.x == null) centerMe();
-    else if (blockedTiles(state.shared).has(Math.round(state.me.pos.x) + "," + Math.round(state.me.pos.y)))
-      state.me.pos = freeTileNear(Math.round(state.me.pos.x), Math.round(state.me.pos.y));
+    else {
+      const rx = Math.round(state.me.pos.x), ry = Math.round(state.me.pos.y);
+      if (!isWalkable(state.shared, rx, ry) || blockedTiles(state.shared).has(rx + "," + ry)) state.me.pos = freeTileNear(rx, ry);
+    }
     applyOffline();
   } else centerMe();
 
@@ -301,9 +307,9 @@ export function tryPlaceFurniture(type, gx, gy, rot = 0) {
   if (furnitureTier(type) > currentTier(s)) return { ok: false, why: "That tier isn't researched yet — use BRAIN furniture." };
   if (esoOfFurniture(type) > currentEso(state.me)) return { ok: false, why: "Not esoteric enough — channel SOUL at an altar." };
   const cells = footprintCells(type, gx, gy, rot);
-  for (const [cx, cy] of cells) if (!inBounds(cx, cy)) return { ok: false, why: "It doesn't fit on the floor here." };
+  for (const [cx, cy] of cells) if (!isWalkable(s, cx, cy)) return { ok: false, why: "It doesn't fit inside a room." };
   const blocked = blockedTiles(s);
-  for (const [cx, cy] of cells) if (blocked.has(cx + "," + cy)) return { ok: false, why: "That space is taken." };
+  for (const [cx, cy] of cells) if (blocked.has(cx + "," + cy) || (s.doors && s.doors[cx + "," + cy])) return { ok: false, why: "That space is taken." };
   const occ = entityTiles();
   for (const [cx, cy] of cells) if (occ.has(cx + "," + cy)) return { ok: false, why: "Someone's standing there." };
   const cost = furnitureBuyCost(s, type);
@@ -357,11 +363,58 @@ export function trySellFurniture(key) {
   delete s.furniture[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
   return { ok: true, refund };
 }
-export function tryExpandFloor() {
-  const s = state.shared; if (!canExpand(s)) return { ok: false, why: "The office is at max size." };
-  const cost = expandCost(s);
+export function tryAddRoom() {
+  const s = state.shared;
+  if (!canAddRoom(s)) return { ok: false, why: "The office is at max size." };
+  const cost = roomCost(s);
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
-  spend(cost); s.floor = { w: s.floor.w + 1, h: s.floor.h + 1 }; commit(); return { ok: true };
+  const { room, hall } = nextRoom(s);
+  spend(cost);
+  s.rooms.push(room); s.halls.push(hall); s.floor = floorBounds(s);
+  commit();
+  return { ok: true, room };
+}
+
+// ---- doors ----------------------------------------------------------------
+
+export function tryPlaceDoor(gx, gy) {
+  const s = state.shared, key = `${gx},${gy}`;
+  if (currentTier(s) < TUNING.doorTier) return { ok: false, why: "Doors unlock at research Tier " + TUNING.doorTier + "." };
+  if (!inHall(s, gx, gy)) return { ok: false, why: "Doors go in hallways." };
+  if (s.doors[key]) return { ok: false, why: "There's already a door there." };
+  if (s.furniture[key] || s.sites[key]) return { ok: false, why: "That tile is occupied." };
+  if (state.me.credits < TUNING.doorCost) return { ok: false, why: "Not enough credits." };
+  spend(TUNING.doorCost);
+  s.doors[key] = { by: state.me.id, locked: false, hash: null };
+  commit();
+  return { ok: true };
+}
+export function tryLockDoor(key, password) {
+  const d = state.shared.doors[key]; if (!d) return { ok: false };
+  if (d.by !== state.me.id) return { ok: false, why: "Only the door's owner can lock it." };
+  if (!password) return { ok: false, why: "Type a password first." };
+  if (state.me.credits < TUNING.lockCost) return { ok: false, why: "A lock costs " + TUNING.lockCost + "." };
+  spend(TUNING.lockCost);
+  d.locked = true; d.hash = hash(String(password));
+  commit();
+  return { ok: true };
+}
+export function tryUnlockDoor(key) {
+  const d = state.shared.doors[key]; if (!d) return { ok: false };
+  if (d.by !== state.me.id) return { ok: false, why: "Only the owner can unlock it." };
+  d.locked = false; commit();
+  return { ok: true };
+}
+export function checkDoorPassword(key, password) {
+  const d = state.shared.doors[key];
+  return !!(d && d.locked && d.hash === hash(String(password)));
+}
+export function tryRemoveDoor(key) {
+  const s = state.shared, d = s.doors[key]; if (!d) return { ok: false };
+  if (d.by !== state.me.id) return { ok: false, why: "Only the owner can remove it." };
+  const refund = Math.ceil(TUNING.doorCost * 0.4 + (d.locked ? TUNING.lockCost * 0.3 : 0));
+  delete s.doors[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
+  return { ok: true, refund };
 }
 
 // ---- inventory actions ----------------------------------------------------
@@ -459,6 +512,6 @@ export function votePot(proposalId) {
   pot.votes[state.me.id] = proposalId; commit(); return { ok: true };
 }
 
-export function inBounds(gx, gy) { const f = state.shared.floor; return gx >= 0 && gy >= 0 && gx < f.w && gy < f.h; }
+export function inBounds(gx, gy) { const f = state.shared.floor; return gx >= f.x && gy >= f.y && gx < f.x + f.w && gy < f.y + f.h; }
 
 export { FURNITURE };

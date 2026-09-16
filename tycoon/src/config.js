@@ -32,10 +32,16 @@ export const TUNING = {
   startCredits: 25,
   offlineCapHours: 8,         // idle income (base + gear only) accrues while away
 
-  startFloor: { w: 9, h: 9 },
-  maxFloor: 26,
-  floorExpandCost: 400,
-  floorExpandGrowth: 2.3,
+  startFloor: { w: 9, h: 9 },   // the main room's size
+  rooms: { size: 5, gap: 3 },   // side-room interior size + hallway length
+  roomCost: 800,                // first side room
+  roomGrowth: 1.55,             // each subsequent room costs this much more
+  maxRooms: 16,
+
+  // Doors + password locks (gated behind research). Locks are expensive.
+  doorTier: 3,
+  doorCost: 500,
+  lockCost: 6000,
 
   walkSpeed: 3.2,             // tiles/sec, before any speed buff
 

@@ -4,6 +4,23 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Rooms + lockable doors — SHIPPED
+The office is no longer a grow-a-rectangle. It's a set of rectangular rooms
+joined by 1-wide hallways. **Add Room** (build bar) spends a factorially-growing
+fee (`roomCost` × `roomGrowth`ⁿ, capped at `maxRooms`) and drops the next side
+room + connecting corridor along one of four arms (E/S/W/N), so every hallway is
+a straight run. Walkable = union of room + hall cells; everything else is void,
+and rooms render enclosed with low back walls. Movement, spawn, NPC wander,
+furniture placement, and shove-target all respect walkability now.
+
+**Doors** unlock at research **Tier `doorTier` (3)**. Buy one (`doorCost`) and
+click a hallway tile to install it. The owner can **password-lock** it for an
+expensive `lockCost`; passwords are stored only as a non-crypto hash (trust
+model, same as the rest of multiplayer). A locked door blocks everyone except
+the owner and anyone who has entered the password this session (client-side
+`unlockDoorLocal`). Owners can unlock (free) or remove (partial refund). Locked
+doors render colored + 🔒; unlocked/open render gray + 🚪/🔓.
+
 ## 2026-09-16 — Shapes, rotation, node mods — SHIPPED
 Arbitrary (cell-list) furniture footprints incl. an L-Desk, rendered as a real
 extruded shape; **R** rotates a piece through 4 orientations while placing.
@@ -85,8 +102,7 @@ their own client applies. Peer push is only lightly tested (needs two live
 clients).
 
 ### 5. Still queued from the earlier feature batch
-- **Rooms + lockable doors**: expansions become small side-rooms joined by
-  hallways; buyable password-locked doors. (Superseded the plain 1-tile expand.)
+- **Rooms + lockable doors** — SHIPPED 2026-09-16 (see top of file).
 - **Combat + Garlic Charlie**: single wandering bot (invests 10%, votes
   randomly); buyable knife that instakills a player/bot; you take their whole
   inventory, the rest drops to the floor to grab; killing adds an immovable

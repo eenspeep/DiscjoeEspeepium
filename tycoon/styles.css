@@ -412,3 +412,7 @@ body {
 .build-btn.mod { background: #f3ecfb; }
 .build-btn.mod.active { border-color: #7a3fb8; background: #ece0fb; }
 .build-sep { align-self: center; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 0 2px; }
+
+/* ---- doors -------------------------------------------------------------- */
+.build-btn.door { background: #e6eefb; }
+.build-btn.door.active { border-color: #3f6fb8; background: #d8e5fb; }

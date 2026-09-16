@@ -381,13 +381,65 @@ export function isUsing(pos, gx, gy) {
   return Math.max(Math.abs(px - gx), Math.abs(py - gy)) <= TUNING.adjacencyRange;
 }
 
-// ---- floor ----------------------------------------------------------------
+// ---- rooms + hallways + doors ---------------------------------------------
+// The floor is a set of rectangular rooms joined by 1-wide hallways. rooms[0] is
+// the main room. Walkable = union of room + hall cells; everything else is void.
 
-export function expandCost(shared) {
-  const steps = Math.max(0, shared.floor.w - TUNING.startFloor.w);
-  return Math.ceil(TUNING.floorExpandCost * Math.pow(TUNING.floorExpandGrowth, steps));
+export function roomCost(shared) {
+  const n = Math.max(0, (shared.rooms ? shared.rooms.length : 1) - 1);
+  return Math.ceil(TUNING.roomCost * Math.pow(TUNING.roomGrowth, n));
 }
-export function canExpand(shared) { return shared.floor.w < TUNING.maxFloor; }
+export function canAddRoom(shared) { return (shared.rooms ? shared.rooms.length : 1) < TUNING.maxRooms; }
+
+export function walkableSet(shared) {
+  const s = new Set();
+  for (const r of (shared.rooms || [])) for (let i = 0; i < r.w; i++) for (let j = 0; j < r.h; j++) s.add((r.x + i) + "," + (r.y + j));
+  for (const h of (shared.halls || [])) for (let i = 0; i < h.w; i++) for (let j = 0; j < h.h; j++) s.add((h.x + i) + "," + (h.y + j));
+  return s;
+}
+export function isWalkable(shared, gx, gy) {
+  for (const r of (shared.rooms || [])) if (gx >= r.x && gx < r.x + r.w && gy >= r.y && gy < r.y + r.h) return true;
+  for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
+  return false;
+}
+export function inHall(shared, gx, gy) {
+  for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
+  return false;
+}
+
+// The next side room + connecting hallway to add. Rooms grow along 4 arms
+// (E, S, W, N) so every hallway is a straight 1-wide corridor.
+export function nextRoom(shared) {
+  const RS = TUNING.rooms.size, GAP = TUNING.rooms.gap, step = RS + GAP;
+  const main = shared.rooms[0];
+  const midX = main.x + Math.floor(main.w / 2), midY = main.y + Math.floor(main.h / 2);
+  const n = (shared.rooms.length - 1), arm = n % 4, k = Math.floor(n / 4) + 1;
+  const half = Math.floor(RS / 2);
+  let room, hall;
+  if (arm === 0) { const rx = main.x + main.w + GAP + (k - 1) * step; room = { x: rx, y: midY - half, w: RS, h: RS }; hall = { x: rx - GAP, y: midY, w: GAP, h: 1 }; }
+  else if (arm === 1) { const ry = main.y + main.h + GAP + (k - 1) * step; room = { x: midX - half, y: ry, w: RS, h: RS }; hall = { x: midX, y: ry - GAP, w: 1, h: GAP }; }
+  else if (arm === 2) { const rx = main.x - GAP - (k - 1) * step - RS; room = { x: rx, y: midY - half, w: RS, h: RS }; hall = { x: rx + RS, y: midY, w: GAP, h: 1 }; }
+  else { const ry = main.y - GAP - (k - 1) * step - RS; room = { x: midX - half, y: ry, w: RS, h: RS }; hall = { x: midX, y: ry + RS, w: 1, h: GAP }; }
+  return { room, hall };
+}
+
+// Bounding box of all rooms + halls (can be negative), used for grid bounds.
+export function floorBounds(shared) {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  const eat = (r) => { minX = Math.min(minX, r.x); minY = Math.min(minY, r.y); maxX = Math.max(maxX, r.x + r.w - 1); maxY = Math.max(maxY, r.y + r.h - 1); };
+  for (const r of (shared.rooms || [])) eat(r);
+  for (const h of (shared.halls || [])) eat(h);
+  if (minX === Infinity) return { x: 0, y: 0, w: 9, h: 9 };
+  return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+}
+
+// Whether `me` can pass the door at `key` (owner + already-unlocked pass free).
+export function doorPassable(door, key, meId, unlocked) {
+  if (!door) return true;
+  if (!door.locked) return true;
+  if (door.by === meId) return true;
+  return !!(unlocked && unlocked.has(key));
+}
 
 // ---- BUILD + BRAIN --------------------------------------------------------
 
