@@ -23,9 +23,9 @@ export const ME_KEY = "joetime:me:v2";
 
 // Economy + world tunables. Pure numbers, safe to tweak.
 export const TUNING = {
-  baseIncome: 1.0,            // c/s every Joey earns before any buffs
+  baseIncome: 1.0,            // c/s every Joey earns before any buffs (exact, for calibration)
   statItemScale: 0.12,        // each BRAIN/BUILD point multiplies matching item value
-  statFlat: 0.05,             // each stat point also adds this many c/s directly
+  statFlat: 0,                // base is exactly 1/s; stats help via item scaling, not flat
   specialtyItemBonus: 0.20,   // your specialty makes matching-tag items +20% effective
   adjacencyRange: 1,          // Chebyshev tiles: you "use" furniture within this range
 
@@ -44,7 +44,7 @@ export const TUNING = {
   buildScale: 0.5,           // extra work/sec per BUILD point
   // BRAIN: research points earned per second per unit of adjacent BRAIN
   // furniture value, times (1 + brain * researchStatBonus).
-  researchScale: 0.5,
+  researchScale: 0.2,        // RP/sec per adjacent BRAIN-furniture tier
   researchStatBonus: 0.10,
   // Cumulative room research needed to reach each tier (index = tier).
   researchTiers: [0, 150, 600, 2000, 6000],

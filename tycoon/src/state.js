@@ -10,7 +10,7 @@ import {
   buildStats, SPECIALTIES, ADJECTIVES,
   ITEMS, ITEM_SLOTS, firstFit, fitsAt, itemCells, bagGrid,
   weekStartFor, everyoneVoted, tallyVotes, proposalById, PROPOSALS,
-  furnitureWork, itemWork, isFurnitureUnlocked, isItemUnlocked,
+  furnitureWork, itemWork, itemPrice, isFurnitureUnlocked, isItemUnlocked,
   buildPower, rpRate, siteProgress, isUsing,
 } from "./economy.js";
 
@@ -310,11 +310,11 @@ export function tryExpandFloor() {
 // ---- inventory actions ----------------------------------------------------
 
 export function tryBuyItem(type) {
-  const def = ITEMS[type];
-  if (!def || def.price == null) return { ok: false, why: "Not for sale." };
-  if (!isItemUnlocked(type, state.shared)) return { ok: false, why: "Not researched yet — use BRAIN furniture." };
-  if (state.me.credits < def.price) return { ok: false, why: "Not enough credits." };
-  spend(def.price);
+  const def = ITEMS[type], price = itemPrice(type);
+  if (!def || !price) return { ok: false, why: "Not for sale." };
+  if (!isItemUnlocked(type, state.shared)) return { ok: false, why: "That tier isn't researched yet — use BRAIN furniture." };
+  if (state.me.credits < price) return { ok: false, why: "Not enough credits." };
+  spend(price);
   state.me.buildQueue.push({ type, work: itemWork(type), prog: 0 });
   saveMe(); notify();
   return { ok: true, queued: true };
@@ -322,7 +322,7 @@ export function tryBuyItem(type) {
 
 export function cancelBuild(index) {
   const q = state.me.buildQueue, job = q[index]; if (!job) return { ok: false };
-  const refund = Math.ceil((ITEMS[job.type].price || 0) * 0.5);
+  const refund = Math.ceil(itemPrice(job.type) * 0.5);
   q.splice(index, 1); state.me.credits = round2(state.me.credits + refund); saveMe(); notify();
   return { ok: true, refund };
 }
@@ -373,7 +373,7 @@ export function trySellItem(id) {
   const def = ITEMS[inst.type];
   if (def.noSell) return { ok: false, why: "You can't get rid of that." };
   if (!me.bag.placements[id]) return { ok: false, why: "Unequip it first." };
-  const refund = Math.ceil((def.price || 0) * 0.4);
+  const refund = Math.ceil(itemPrice(inst.type) * 0.4);
   delete me.bag.placements[id]; delete me.items[id];
   me.credits = round2(me.credits + refund); saveMe(); notify();
   return { ok: true, refund };
