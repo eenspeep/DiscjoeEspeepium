@@ -4,6 +4,32 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Cosmetic pass: gear on the body + shaped furniture — SHIPPED
+Two visual upgrades.
+
+**Gear shows on your Joey.** The equipped-gear vector art (hats, glasses,
+nose gear, torso plate, hand item, a shield on the arm, a weapon in hand) was
+extracted from the procedural Joey into shared `paintTorsoGear` / `paintFaceGear`
+passes, and is now layered over the `joey.png` sprite too, not just the vector
+fallback. `drawJoeySprite` takes `worn` and paints gear in a frame mapped onto
+the sprite (`GEAR_SCALE` 1.16, feet anchor 11 — tune those two if a future
+sprite has different proportions). Peers carry their gear through presence
+(`worn`), so you see everyone's loadout.
+
+**Furniture looks like the thing.** Replaced the "colored cube + emoji" with
+shaped isometric models in `world.js` (`FURN_ART` maps each type to a drawer;
+`box`/`posts`/`panel` primitives build them). Archetypes: tables with legs +
+a topper (pizza / net+paddles / espresso machine), a chair with a backrest,
+desks with drawer seams, monitor desks, a tool chest, whiteboards as upright
+panels on posts with scribbles, a water cooler with a blue jug, server racks
+with rack-unit slots + blinking LEDs, machines with a spinning gear / robot arm /
+glowing core, a stepped altar and a tall obelisk with a pulsing gem, and a
+run-down rat motel with a pitched roof. Body height scales with footprint area
+(`tall`) so 2×2 machines aren't slabs. Glyph only remains as a fallback for
+unmodeled types (`genericBox`). "In use" now shows a green ground ring and
+selection a white one (decoupled from object height); level/⚠️/mod glyphs sit
+above the modeled top (`furnTopH`). Construction sites keep the ghost prism.
+
 ## 2026-09-16 — Rat leash (recruit a tired rat as a buddy) — SHIPPED
 Buy a **Rat Leash** (tier-2 gear, weapon slot) and equip it. Face a **tired**
 rat (the spinning-💫 kind) within interact range and press **Q**: instead of

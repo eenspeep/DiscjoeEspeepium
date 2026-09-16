@@ -3,7 +3,7 @@
 // you're standing next to glows to show you're "using" it.
 
 import { TILE_W, TILE_H, camera, project, screenToGrid } from "./iso.js";
-import { drawJoey, drawJoeySprite, enzoImage, lookFromSeed, shade } from "./appearance.js";
+import { drawJoey, drawJoeySprite, enzoImage, lookFromSeed, shade, rrect } from "./appearance.js";
 import {
   FURNITURE, MODS, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isNearFootprint,
   footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt, hasSurface,
@@ -597,33 +597,227 @@ function drawTile(gx, gy, fill) {
 
 const TAG_TINT = { brain: "#4b56b8", build: "#c9772f", neutral: "#7f8794" };
 
-function drawFurniture(ax, ay, f, selected, using) {
-  const def = FURNITURE[f.type];
-  const tint = f.broken ? "#7c7c80" : (TAG_TINT[def.tag] || "#9aa3af");   // gray when rat-mauled
-  const cells = footprintCells(f.type, ax, ay, f.rot || 0);
-  const z = def.h * camera.zoom * (1 + (f.level - 1) * 0.12);
-  drawCellsPrism(cells, tint, z, { selected, using });
+// ---- furniture models -----------------------------------------------------
+// Each piece is drawn as shaped isometric volumes (a body of boxes plus a few
+// accent marks) so it reads as the actual object, not a colored cube with an
+// emoji. Heights are in design px, scaled by camera zoom inside the helpers.
 
-  const cen = centroid(cells), p = project(cen.x, cen.y, canvas);
-  ctx.font = `${15 * camera.zoom}px system-ui, sans-serif`;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.globalAlpha = f.broken ? 0.55 : 1;
-  ctx.fillText(def.glyph, p.x, p.y - z - 1 * camera.zoom);
-  ctx.globalAlpha = 1;
-  if (f.broken) { ctx.font = `${13 * camera.zoom}px system-ui, sans-serif`; ctx.fillText("⚠️", p.x + 9 * camera.zoom, p.y - z - 8 * camera.zoom); }
-  if (f.level > 1) {
-    ctx.font = `${9 * camera.zoom}px system-ui, sans-serif`;
-    ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.fillText("L" + f.level, p.x, p.y - z + 11 * camera.zoom);
+// Screen point of a grid position raised by h design-px.
+function fp(gx, gy, h = 0) { const p = project(gx, gy, canvas); return { x: p.x, y: p.y - h * camera.zoom }; }
+
+// An axis-aligned iso box over a grid rect, from height zb..zt (design px).
+// Returns the four ground corners + top height so callers can add detail.
+function box(g0x, g0y, g1x, g1y, zb, zt, tint) {
+  const Z = camera.zoom, hb = zb * Z, ht = zt * Z;
+  const nw = fp(g0x, g0y), ne = fp(g1x, g0y), se = fp(g1x, g1y), sw = fp(g0x, g1y);
+  if (zt > zb) {
+    ctx.fillStyle = shade(tint, -32);   // left face (sw–se)
+    quad({ x: sw.x, y: sw.y - hb }, { x: se.x, y: se.y - hb }, { x: se.x, y: se.y - ht }, { x: sw.x, y: sw.y - ht });
+    ctx.fillStyle = shade(tint, -16);   // right face (ne–se)
+    quad({ x: ne.x, y: ne.y - hb }, { x: se.x, y: se.y - hb }, { x: se.x, y: se.y - ht }, { x: ne.x, y: ne.y - ht });
   }
-  if (f.mods) {
-    ctx.font = `${12 * camera.zoom}px system-ui, sans-serif`;
-    for (const [mk, mtype] of Object.entries(f.mods)) {
-      const [mx, my] = mk.split(",").map(Number), mp = project(mx, my, canvas);
-      ctx.fillText((MODS[mtype] && MODS[mtype].glyph) || "?", mp.x, mp.y - z - 6 * camera.zoom);
-    }
+  ctx.fillStyle = tint;                 // top face
+  ctx.beginPath(); ctx.moveTo(nw.x, nw.y - ht); ctx.lineTo(ne.x, ne.y - ht); ctx.lineTo(se.x, se.y - ht); ctx.lineTo(sw.x, sw.y - ht); ctx.closePath(); ctx.fill();
+  return { nw, ne, se, sw, ht, hb, cxTop: (nw.x + se.x) / 2, cyTop: (nw.y + se.y) / 2 - ht };
+}
+// Four corner posts (legs/table stand) inside a rect.
+function posts(g, top, tint, d = 0.09) {
+  const c = [[g.g0x + d, g.g0y + d], [g.g1x - d, g.g0y + d], [g.g1x - d, g.g1y - d], [g.g0x + d, g.g1y - d]];
+  for (const [x, y] of c) box(x - d, y - d, x + d, y + d, 0, top, shade(tint, -22));
+}
+// An upright billboard panel centered on the footprint (for boards/screens).
+function panel(g, groundH, w, h, fill, stroke) {
+  const c = fp(g.cx, g.cy, groundH), Z = camera.zoom, W = w * Z, H = h * Z;
+  ctx.fillStyle = fill; rrect(ctx, c.x - W / 2, c.y - H, W, H, 3 * Z);
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.4 * Z; ctx.strokeRect(c.x - W / 2, c.y - H, W, H); }
+  return { x: c.x, y: c.y, W, H, Z };
+}
+
+function mTable(g) {
+  const Z = camera.zoom, topH = g.def.h * 0.62 * g.lvl;
+  posts(g, topH, g.tint);
+  const top = box(g.g0x, g.g0y, g.g1x, g.g1y, topH, topH + 3, shade(g.tint, 12));
+  const c = { x: top.cxTop, y: top.cyTop };
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  if (g.type === "snacktable") { ctx.fillStyle = "#e7c15a"; ctx.beginPath(); ctx.arc(c.x, c.y, 6 * Z, 0, 7); ctx.fill(); ctx.fillStyle = "#c0392b"; ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.arc(c.x, c.y, 6 * Z, -0.5, 0.6); ctx.closePath(); ctx.fill(); }
+  else if (g.type === "pingpong") { ctx.strokeStyle = "#e9edf3"; ctx.lineWidth = 1.4 * Z; ctx.beginPath(); ctx.moveTo(c.x - 10 * Z, c.y - 2 * Z); ctx.lineTo(c.x + 10 * Z, c.y - 2 * Z); ctx.stroke(); ctx.fillStyle = "#c0392b"; ctx.beginPath(); ctx.arc(c.x - 12 * Z, c.y + 2 * Z, 2.4 * Z, 0, 7); ctx.fill(); ctx.beginPath(); ctx.arc(c.x + 12 * Z, c.y + 2 * Z, 2.4 * Z, 0, 7); ctx.fill(); }
+  else if (g.type === "espresso") { ctx.fillStyle = "#3a3f4b"; rrect(ctx, c.x - 4 * Z, c.y - 12 * Z, 8 * Z, 12 * Z, 2 * Z); ctx.fillStyle = "#e9edf3"; ctx.fillRect(c.x - 2 * Z, c.y - 4 * Z, 4 * Z, 3 * Z); ctx.globalAlpha *= 0.6; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(c.x, c.y - 15 * Z, 2 * Z, 0, 7); ctx.fill(); ctx.globalAlpha /= 0.6; }
+}
+function mChair(g) {
+  const seatH = g.def.h * 0.5 * g.lvl;
+  posts({ g0x: g.g0x + 0.06, g0y: g.g0y + 0.06, g1x: g.g1x - 0.06, g1y: g.g1y - 0.06 }, seatH, g.tint, 0.07);
+  box(g.g0x + 0.04, g.g0y + 0.04, g.g1x - 0.04, g.g1y - 0.04, seatH, seatH + 2.5, shade(g.tint, 8));
+  box(g.g0x + 0.04, g.g0y + 0.04, g.g1x - 0.04, g.g0y + 0.2, seatH + 2.5, seatH + 13 * g.lvl, g.tint);   // backrest at the back edge
+}
+function mDesk(g) {
+  const bodyH = g.def.h * 0.7 * g.lvl;
+  const b = box(g.g0x, g.g0y, g.g1x, g.g1y, 0, bodyH, g.tint);
+  // drawer seams on the right (front) face
+  ctx.strokeStyle = shade(g.tint, -34); ctx.lineWidth = 1 * camera.zoom;
+  ctx.beginPath(); ctx.moveTo(b.ne.x, b.ne.y - b.ht * 0.62); ctx.lineTo(b.se.x, b.se.y - b.ht * 0.62); ctx.stroke();
+  const c = { x: b.cxTop, y: b.cyTop }, Z = camera.zoom;
+  if (g.type === "workbench") { ctx.strokeStyle = "#c9772f"; ctx.lineWidth = 2 * Z; ctx.beginPath(); ctx.moveTo(c.x - 6 * Z, c.y); ctx.lineTo(c.x + 2 * Z, c.y - 5 * Z); ctx.stroke(); ctx.fillStyle = "#8a939f"; ctx.beginPath(); ctx.arc(c.x + 5 * Z, c.y - 1 * Z, 2.2 * Z, 0, 7); ctx.fill(); }
+  else { ctx.fillStyle = "#f4f6fa"; ctx.fillRect(c.x - 4 * Z, c.y - 3 * Z, 8 * Z, 5 * Z); ctx.strokeStyle = "#9aa3af"; ctx.lineWidth = 0.8 * Z; ctx.strokeRect(c.x - 4 * Z, c.y - 3 * Z, 8 * Z, 5 * Z); }
+}
+function mDeskMon(g) {
+  const bodyH = g.def.h * 0.55 * g.lvl;
+  box(g.g0x, g.g0y, g.g1x, g.g1y, 0, bodyH, g.tint);
+  const scr = panel({ cx: g.cx - 0.12, cy: g.cy - 0.12 }, bodyH, 15, 11, "#20242e", shade(g.tint, 20));
+  ctx.fillStyle = g.type === "researchterm" ? "#7fe6c9" : "#8fb7ff";
+  ctx.fillRect(scr.x - scr.W / 2 + 2 * scr.Z, scr.y - scr.H + 2 * scr.Z, scr.W - 4 * scr.Z, scr.H - 4 * scr.Z);
+  ctx.fillStyle = "#20242e";
+  if (g.type === "researchterm") { ctx.beginPath(); ctx.arc(scr.x, scr.y - scr.H / 2, 2.4 * scr.Z, 0, 7); ctx.fill(); }
+  else { for (let i = 0; i < 3; i++) ctx.fillRect(scr.x - scr.W / 2 + 3 * scr.Z, scr.y - scr.H + (3 + i * 2.5) * scr.Z, (4 + i * 2) * scr.Z, 1.2 * scr.Z); }
+}
+function mChest(g) {
+  const bodyH = g.def.h * 0.6 * g.lvl;
+  const b = box(g.g0x + 0.04, g.g0y + 0.04, g.g1x - 0.04, g.g1y - 0.04, 0, bodyH, g.tint);
+  ctx.strokeStyle = shade(g.tint, -34); ctx.lineWidth = 1.2 * camera.zoom;
+  ctx.beginPath(); ctx.moveTo(b.ne.x, b.ne.y - b.ht * 0.5); ctx.lineTo(b.se.x, b.se.y - b.ht * 0.5); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(b.sw.x, b.sw.y - b.ht * 0.5); ctx.lineTo(b.se.x, b.se.y - b.ht * 0.5); ctx.stroke();
+  ctx.fillStyle = "#e9c65a"; ctx.fillRect(b.cxTop - 1.5 * camera.zoom, b.cyTop + b.ht * 0.4, 3 * camera.zoom, 3 * camera.zoom);   // latch
+}
+function mBoard(g) {
+  const Z = camera.zoom, standH = g.def.h * 0.42 * g.lvl;
+  box(g.cx - 0.32, g.g1y - 0.16, g.cx - 0.22, g.g1y - 0.06, 0, standH, shade(g.tint, -20));
+  box(g.cx + 0.22, g.g1y - 0.16, g.cx + 0.32, g.g1y - 0.06, 0, standH, shade(g.tint, -20));
+  const face = g.type === "quantumboard" ? "#1c2330" : "#f4f6fa";
+  const pn = panel(g, standH, 34, 20 * g.lvl / g.lvl, face, shade(g.tint, -10));
+  ctx.strokeStyle = g.type === "quantumboard" ? "#8fb7ff" : "#4b56b8"; ctx.lineWidth = 1.3 * Z; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(pn.x - 10 * Z, pn.y - 13 * Z); ctx.lineTo(pn.x - 2 * Z, pn.y - 8 * Z); ctx.lineTo(pn.x + 4 * Z, pn.y - 14 * Z); ctx.lineTo(pn.x + 11 * Z, pn.y - 7 * Z); ctx.stroke();
+  if (g.type === "quantumboard") { ctx.strokeStyle = "#f2b134"; ctx.beginPath(); ctx.ellipse(pn.x, pn.y - 10 * Z, 9 * Z, 4 * Z, 0.5, 0, 7); ctx.stroke(); }
+}
+function mCooler(g) {
+  const Z = camera.zoom, standH = g.def.h * 0.5 * g.lvl;
+  box(g.g0x + 0.14, g.g0y + 0.14, g.g1x - 0.14, g.g1y - 0.14, 0, standH, shade(g.tint, -6));
+  const c = fp(g.cx, g.cy, standH);
+  ctx.fillStyle = "rgba(120,190,240,0.85)"; rrect(ctx, c.x - 5 * Z, c.y - 14 * Z, 10 * Z, 14 * Z, 3 * Z);
+  ctx.fillStyle = "rgba(200,230,255,0.6)"; rrect(ctx, c.x - 3 * Z, c.y - 12 * Z, 3 * Z, 8 * Z, 1.5 * Z);
+}
+function mRack(g) {
+  const Z = camera.zoom, bodyH = g.def.h * g.tall * g.lvl;
+  const b = box(g.g0x + 0.15, g.g0y + 0.15, g.g1x - 0.15, g.g1y - 0.15, 0, bodyH, shade(g.tint, -10));
+  // dark front bezel with rack-unit slots + a column of blinking LEDs
+  const fL = (t, hz) => ({ x: b.ne.x + (b.se.x - b.ne.x) * t, y: b.ne.y + (b.se.y - b.ne.y) * t - b.ht * hz });
+  ctx.strokeStyle = shade(g.tint, -40); ctx.lineWidth = 1 * Z;
+  for (let i = 1; i < 7; i++) { const a = fL(0.12, i / 7), c2 = fL(0.9, i / 7); ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(c2.x, c2.y); ctx.stroke(); }
+  const on = (Math.floor(now() / 380) % 3);
+  for (let i = 0; i < 6; i++) { ctx.fillStyle = i % 3 === on ? "#8ff0ac" : "#2f6b3f"; const p = fL(0.2, (i + 0.5) / 7); ctx.beginPath(); ctx.arc(p.x, p.y, 1.7 * Z, 0, 7); ctx.fill(); }
+}
+function mMachine(g) {
+  const Z = camera.zoom, bodyH = g.def.h * g.tall * g.lvl;
+  const b = box(g.g0x + 0.12, g.g0y + 0.12, g.g1x - 0.12, g.g1y - 0.12, 0, bodyH, g.tint);
+  // control panel on the front (right) face
+  const pL = (t, hz) => ({ x: b.ne.x + (b.se.x - b.ne.x) * t, y: b.ne.y + (b.se.y - b.ne.y) * t - b.ht * hz });
+  const a = pL(0.3, 0.42), w = pL(0.7, 0.42);
+  ctx.strokeStyle = shade(g.tint, -38); ctx.lineWidth = 1 * Z;
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(w.x, w.y); ctx.stroke();
+  ctx.fillStyle = "#f2b134"; ctx.beginPath(); ctx.arc(pL(0.4, 0.28).x, pL(0.4, 0.28).y, 1.4 * Z, 0, 7); ctx.fill();
+  ctx.fillStyle = "#7fe6c9"; ctx.beginPath(); ctx.arc(pL(0.6, 0.28).x, pL(0.6, 0.28).y, 1.4 * Z, 0, 7); ctx.fill();
+  const c = { x: b.cxTop, y: b.cyTop };
+  if (g.type === "forge" || g.type === "fabricator") {   // gear wheel
+    const spin = now() / 900; ctx.save(); ctx.translate(c.x, c.y - 3 * Z); ctx.rotate(spin);
+    ctx.fillStyle = shade(g.tint, 22); for (let i = 0; i < 8; i++) { ctx.rotate(Math.PI / 4); ctx.fillRect(-1.4 * Z, -8 * Z, 2.8 * Z, 4 * Z); }
+    ctx.beginPath(); ctx.arc(0, 0, 5 * Z, 0, 7); ctx.fill(); ctx.fillStyle = shade(g.tint, -30); ctx.beginPath(); ctx.arc(0, 0, 2 * Z, 0, 7); ctx.fill(); ctx.restore();
+  } else if (g.type === "robotarm") {   // articulated arm
+    ctx.strokeStyle = shade(g.tint, 26); ctx.lineWidth = 2.6 * Z; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(c.x, c.y); ctx.lineTo(c.x + 4 * Z, c.y - 9 * Z); ctx.lineTo(c.x + 12 * Z, c.y - 6 * Z); ctx.stroke();
+    ctx.fillStyle = "#f2b134"; ctx.beginPath(); ctx.arc(c.x + 13 * Z, c.y - 6 * Z, 2 * Z, 0, 7); ctx.fill();
+  } else {   // oracle / realitypress: glowing core
+    ctx.globalAlpha *= 0.85; ctx.fillStyle = g.type === "oracle" ? "#b98cff" : "#ff8f6a";
+    ctx.beginPath(); ctx.arc(c.x, c.y - 3 * Z, 5 * Z, 0, 7); ctx.fill();
+    ctx.globalAlpha /= 0.85; ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(c.x - 1 * Z, c.y - 4 * Z, 1.6 * Z, 0, 7); ctx.fill();
   }
 }
+function mAltar(g) {
+  const Z = camera.zoom, tall = g.type === "obelisk";
+  if (tall) {
+    box(g.cx - 0.22, g.cy - 0.22, g.cx + 0.22, g.cy + 0.22, 0, g.def.h * g.lvl, "#2b2f3a");
+    const c = fp(g.cx, g.cy, g.def.h * g.lvl);
+    ctx.fillStyle = "rgba(150,120,255,0.5)"; for (let i = 0; i < 3; i++) { ctx.beginPath(); ctx.arc(c.x, c.y + (4 + i * 6) * Z, 2 * Z, 0, 7); ctx.fill(); }
+  } else {
+    box(g.g0x + 0.16, g.g0y + 0.16, g.g1x - 0.16, g.g1y - 0.16, 0, g.def.h * 0.5 * g.lvl, shade(g.tint, -6));
+    box(g.g0x + 0.28, g.g0y + 0.28, g.g1x - 0.28, g.g1y - 0.28, g.def.h * 0.5 * g.lvl, g.def.h * 0.62 * g.lvl, shade(g.tint, 10));
+  }
+  const top = fp(g.cx, g.cy, (tall ? g.def.h : g.def.h * 0.62) * g.lvl);
+  const pulse = 0.6 + 0.4 * Math.sin(now() / 500);
+  ctx.save(); ctx.globalAlpha *= pulse; ctx.fillStyle = tall ? "#9a7dff" : "#c39bff";
+  ctx.beginPath(); ctx.arc(top.x, top.y - 4 * Z, 4 * Z, 0, 7); ctx.fill(); ctx.restore();
+}
+function mMotel(g) {
+  const Z = camera.zoom, wallH = g.def.h * 0.7 * g.lvl;
+  const b = box(g.g0x + 0.08, g.g0y + 0.08, g.g1x - 0.08, g.g1y - 0.08, 0, wallH, "#8a7a5c");
+  // little pitched roof
+  const apexL = fp(g.g0x + 0.08, g.cy, wallH + 8), apexR = fp(g.g1x - 0.08, g.cy, wallH + 8);
+  ctx.fillStyle = "#6b4f3a";
+  ctx.beginPath(); ctx.moveTo(b.nw.x, b.nw.y - b.ht); ctx.lineTo(b.ne.x, b.ne.y - b.ht); ctx.lineTo(apexR.x, apexR.y); ctx.lineTo(apexL.x, apexL.y); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = "#2b2f3a"; ctx.fillRect(b.cxTop - 2 * Z, b.cyTop + b.ht * 0.3, 4 * Z, 5 * Z);   // dark doorway
+}
+
+const FURN_ART = {
+  snacktable: mTable, pingpong: mTable, espresso: mTable,
+  chair: mChair,
+  workbench: mDesk, ldesk: mDesk,
+  standdesk: mDeskMon, researchterm: mDeskMon,
+  toolchest: mChest,
+  whiteboard: mBoard, quantumboard: mBoard,
+  cooler: mCooler,
+  server: mRack, aicluster: mRack, singularity: mRack, nanoforge: mRack,
+  forge: mMachine, robotarm: mMachine, fabricator: mMachine, oracle: mMachine, realitypress: mMachine,
+  altar: mAltar, obelisk: mAltar,
+  ratmotel: mMotel,
+};
+
+function genericBox(g) {
+  box(g.g0x, g.g0y, g.g1x, g.g1y, 0, g.def.h * g.lvl, g.tint);
+  const c = fp(g.cx, g.cy, g.def.h * g.lvl);
+  ctx.font = `${15 * camera.zoom}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(g.def.glyph, c.x, c.y - 2 * camera.zoom);
+}
+
+const TALL_ART = new Set(["server", "aicluster", "singularity", "nanoforge", "forge", "robotarm", "fabricator", "oracle", "realitypress"]);
+// approximate top height (design px) of a modeled piece, for placing mods/labels
+function furnTopH(g) {
+  const h = g.def.h * g.lvl;
+  if (TALL_ART.has(g.type)) return h * g.tall;
+  if (g.type === "whiteboard" || g.type === "quantumboard") return g.def.h * 0.42 * g.lvl + 20;
+  return h;
+}
+
+function drawFurniture(ax, ay, f, selected, using) {
+  const def = FURNITURE[f.type];
+  const broken = f.broken, Z = camera.zoom;
+  const tint = broken ? "#7c7c80" : (TAG_TINT[def.tag] || "#9aa3af");
+  const cells = footprintCells(f.type, ax, ay, f.rot || 0);
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  for (const [x, y] of cells) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
+
+  // ground cue: green ring when in use, white outline when selected
+  if (using || selected) {
+    for (const [cx, cy] of cells) { const c = tileCorners(cx, cy); ctx.beginPath(); ctx.moveTo(c.T.x, c.T.y); ctx.lineTo(c.R.x, c.R.y); ctx.lineTo(c.B.x, c.B.y); ctx.lineTo(c.L.x, c.L.y); ctx.closePath(); ctx.strokeStyle = using ? "rgba(70,200,130,0.9)" : "rgba(255,255,255,0.9)"; ctx.lineWidth = (using ? 2 : 1.4) * Z; ctx.stroke(); }
+  }
+
+  const ins = 0.16, area = (maxX - minX + 1) * (maxY - minY + 1);
+  const g = {
+    type: f.type, def, tint, broken, level: f.level || 1, lvl: 1 + ((f.level || 1) - 1) * 0.12,
+    area, tall: 0.95 + 0.16 * area,   // taller bodies for bigger footprints (so 2×2 machines aren't slabs)
+    g0x: minX - 0.5 + ins, g0y: minY - 0.5 + ins, g1x: maxX + 0.5 - ins, g1y: maxY + 0.5 - ins,
+    cx: (minX + maxX) / 2, cy: (minY + maxY) / 2,
+  };
+  ctx.globalAlpha = broken ? 0.55 : 1;
+  (FURN_ART[f.type] || genericBox)(g);
+  ctx.globalAlpha = 1;
+
+  const topH = furnTopH(g), c = fp(g.cx, g.cy, topH);
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  if (broken) { ctx.font = `${14 * Z}px system-ui, sans-serif`; ctx.fillText("⚠️", c.x + 8 * Z, c.y - 6 * Z); }
+  if (f.level > 1) { ctx.font = `${9 * Z}px "Fredoka", system-ui, sans-serif`; ctx.fillStyle = "rgba(20,22,28,0.7)"; rrectW(c.x - 8 * Z, c.y + 2 * Z, 16 * Z, 11 * Z, 3 * Z); ctx.fillStyle = "#eef1f5"; ctx.fillText("L" + f.level, c.x, c.y + 7.5 * Z); }
+  if (f.mods) {
+    ctx.font = `${12 * Z}px system-ui, sans-serif`;
+    for (const [mk, mtype] of Object.entries(f.mods)) { const [mx, my] = mk.split(",").map(Number), mp = fp(mx, my, topH + 6); ctx.fillText((MODS[mtype] && MODS[mtype].glyph) || "?", mp.x, mp.y); }
+  }
+}
+function rrectW(x, y, w, h, r) { rrect(ctx, x, y, w, h, r); }
 
 function drawSite(ax, ay, site) {
   const def = FURNITURE[site.type], tint = TAG_TINT[def.tag] || "#9aa3af";
@@ -649,8 +843,9 @@ function drawMe(t) {
   const opts = {
     look: state.me.look, scale: camera.zoom * (state.me.created ? sizeMult(state.me) : 1),
     walking: state.me.moving, t, using, name: state.me.created ? state.me.name : "new Joey",
+    worn: state.me.created ? wornArt(state.me) : {},
   };
-  if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, { ...opts, worn: wornArt(state.me) });
+  if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, opts);
   if (state.me.created && petActive(state.me)) drawPetRat(p);
 }
 
@@ -665,8 +860,8 @@ function drawPetRat(p) {
 function drawPeer(r, t, isNpc = false) {
   const p = project(r.x, r.y, canvas);
   if (isNpc) ctx.globalAlpha = 0.95;
-  const opts = { look: r.look, scale: camera.zoom * (r.size || 1), walking: r.moving, t, name: r.name || "JOEY" };
-  if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, { ...opts, worn: r.worn || {} });
+  const opts = { look: r.look, scale: camera.zoom * (r.size || 1), walking: r.moving, t, name: r.name || "JOEY", worn: r.worn || {} };
+  if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, opts);
   ctx.globalAlpha = 1;
   if (r.pet) drawPetRat(p);
   if (r.id === CHARLIE_ID) {
