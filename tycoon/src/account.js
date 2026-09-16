@@ -52,10 +52,16 @@ export async function signOut() {
   if (sb) await sb.auth.signOut();
 }
 
+// Surface profile save/load failures (usually a missing `profiles` table or an
+// RLS policy) to the UI so they're diagnosable instead of silently swallowed.
+let errCb = null;
+export function onProfileError(fn) { errCb = fn; }
+function reportErr(kind, msg) { console.warn("[joetime] profile " + kind + ":", msg); if (errCb) try { errCb(kind, msg); } catch {} }
+
 export async function loadProfile(userId) {
   const sb = await getSupabase();
   const { data, error } = await sb.from("profiles").select("data").eq("id", userId).maybeSingle();
-  if (error) { console.warn("[joetime] profile load:", error.message); return null; }
+  if (error) { reportErr("load", error.message || String(error)); return null; }
   return data ? data.data : null;
 }
 
@@ -68,7 +74,7 @@ export function saveProfile(userId, meData) {
     try {
       const sb = await getSupabase();
       const { error } = await sb.from("profiles").upsert({ id, data, updated_at: new Date().toISOString() });
-      if (error) console.warn("[joetime] profile save:", error.message);
-    } catch (e) { console.warn("[joetime] profile save failed:", e); }
+      if (error) reportErr("save", error.message || String(error));
+    } catch (e) { reportErr("save", (e && e.message) || String(e)); }
   }, 2500);
 }
