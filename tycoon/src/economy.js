@@ -78,6 +78,7 @@ export const FURNITURE = {
   pingpong: { name: "Ping-Pong Table", glyph: "🏓", tag: "neutral", tier: 3, unit: 1.0, costUnit: 1.2, h: 10 },
   whiteboard: { name: "Whiteboard", glyph: "📝", tag: "brain", tier: 3, unit: 1.0, costUnit: 1.2, h: 20 },
   toolchest: { name: "Tool Chest", glyph: "🧰", tag: "build", tier: 3, unit: 1.0, costUnit: 1.2, h: 14 },
+  ldesk: { name: "L-Desk", glyph: "🗒️", tag: "build", tier: 3, unit: 1.1, costUnit: 1.3, h: 12 },
   server: { name: "Server Rack", glyph: "🖥️", tag: "brain", tier: 4, unit: 1.2, costUnit: 1.3, h: 22 },
   forge: { name: "Machine Press", glyph: "⚙️", tag: "build", tier: 4, unit: 1.2, costUnit: 1.3, h: 18 },
   espresso: { name: "Espresso Bar", glyph: "☕", tag: "neutral", tier: 5, unit: 1.3, costUnit: 1.4, h: 12 },
@@ -107,39 +108,83 @@ export function furnitureTier(type) { return FURNITURE[type].tier; }
 export function furnitureWork(type) { return 6 + (FURNITURE[type].tier - 1) * 8; }
 
 // ---- footprints + collision -----------------------------------------------
-// Rectangular footprints (w x h tiles), anchored at the placed tile. Default 1x1.
+// Footprints are arbitrary cell lists (relative to the anchor), so pieces can be
+// L-shaped, and can be rotated (0..3). Default is a single 1x1 tile.
+function rect(w, h) { const c = []; for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) c.push([i, j]); return c; }
 const FOOTPRINT = {
-  pingpong: [2, 1], whiteboard: [2, 1], server: [2, 1], espresso: [2, 1], standdesk: [2, 1],
-  researchterm: [2, 1], printer3d: [2, 1], quantumboard: [2, 1],
-  forge: [2, 2], robotarm: [2, 2], aicluster: [2, 2], nanoforge: [2, 2], oracle: [2, 2], fabricator: [2, 2],
-  singularity: [3, 2], realitypress: [3, 2],
+  pingpong: rect(2, 1), whiteboard: rect(2, 1), server: rect(2, 1), espresso: rect(2, 1), standdesk: rect(2, 1),
+  researchterm: rect(2, 1), printer3d: rect(2, 1), quantumboard: rect(2, 1),
+  forge: rect(2, 2), robotarm: rect(2, 2), aicluster: rect(2, 2), nanoforge: rect(2, 2), oracle: rect(2, 2), fabricator: rect(2, 2),
+  singularity: rect(3, 2), realitypress: rect(3, 2),
+  ldesk: [[0, 0], [1, 0], [0, 1]], // L-shaped desk
 };
-export function footprintOf(type) { return FOOTPRINT[type] || [1, 1]; }
-export function footprintCells(type, ax, ay) {
-  const [w, h] = footprintOf(type), out = [];
-  for (let i = 0; i < w; i++) for (let j = 0; j < h; j++) out.push([ax + i, ay + j]);
-  return out;
+export function footprintOf(type) { return FOOTPRINT[type] || [[0, 0]]; }
+export function footprintCells(type, ax, ay, rot = 0) {
+  return rotateCells(footprintOf(type), rot).map(([x, y]) => [ax + x, ay + y]);
 }
-export function isNearFootprint(pos, type, ax, ay, range) {
+export function isNearFootprint(pos, type, ax, ay, range, rot = 0) {
   const px = Math.round(pos.x), py = Math.round(pos.y);
-  for (const [cx, cy] of footprintCells(type, ax, ay)) if (Math.max(Math.abs(px - cx), Math.abs(py - cy)) <= range) return true;
+  for (const [cx, cy] of footprintCells(type, ax, ay, rot)) if (Math.max(Math.abs(px - cx), Math.abs(py - cy)) <= range) return true;
   return false;
 }
 // Set of "x,y" tiles that are solid (furniture + construction sites).
 export function blockedTiles(shared) {
   const set = new Set();
-  for (const [key, f] of Object.entries(shared.furniture || {})) { const [ax, ay] = key.split(",").map(Number); for (const [cx, cy] of footprintCells(f.type, ax, ay)) set.add(cx + "," + cy); }
-  for (const [key, s] of Object.entries(shared.sites || {})) { const [ax, ay] = key.split(",").map(Number); for (const [cx, cy] of footprintCells(s.type, ax, ay)) set.add(cx + "," + cy); }
+  for (const [key, f] of Object.entries(shared.furniture || {})) { const [ax, ay] = key.split(",").map(Number); for (const [cx, cy] of footprintCells(f.type, ax, ay, f.rot || 0)) set.add(cx + "," + cy); }
+  for (const [key, s] of Object.entries(shared.sites || {})) { const [ax, ay] = key.split(",").map(Number); for (const [cx, cy] of footprintCells(s.type, ax, ay, s.rot || 0)) set.add(cx + "," + cy); }
   return set;
 }
-// Which furniture/site anchor covers tile (gx,gy)?
+function coversTile(type, ax, ay, rot, gx, gy) {
+  for (const [cx, cy] of footprintCells(type, ax, ay, rot)) if (cx === gx && cy === gy) return true;
+  return false;
+}
 export function furnitureAnchorAt(shared, gx, gy) {
-  for (const [key, f] of Object.entries(shared.furniture || {})) { const [ax, ay] = key.split(",").map(Number); const [w, h] = footprintOf(f.type); if (gx >= ax && gx < ax + w && gy >= ay && gy < ay + h) return key; }
+  for (const [key, f] of Object.entries(shared.furniture || {})) { const [ax, ay] = key.split(",").map(Number); if (coversTile(f.type, ax, ay, f.rot || 0, gx, gy)) return key; }
   return null;
 }
 export function siteAnchorAt(shared, gx, gy) {
-  for (const [key, s] of Object.entries(shared.sites || {})) { const [ax, ay] = key.split(",").map(Number); const [w, h] = footprintOf(s.type); if (gx >= ax && gx < ax + w && gy >= ay && gy < ay + h) return key; }
+  for (const [key, s] of Object.entries(shared.sites || {})) { const [ax, ay] = key.split(",").map(Number); if (coversTile(s.type, ax, ay, s.rot || 0, gx, gy)) return key; }
   return null;
+}
+
+// ---- node mods (surface furniture) ----------------------------------------
+// Flat bonuses mounted on a surface furniture's tiles. NOT multipliers (that's
+// furniture's job). Magnitude scales with the mod's own tier so it stays useful.
+const SURFACE = new Set(["snacktable", "workbench", "pingpong", "toolchest", "espresso", "standdesk", "ldesk", "printer3d", "researchterm", "robotarm", "nanoforge", "fabricator"]);
+export function hasSurface(type) { return SURFACE.has(type); }
+
+export const MODS = {
+  plant: { name: "Desk Plant", glyph: "🪴", kind: "income", tier: 1, unit: 6, costUnit: 0.5 },
+  lamp: { name: "Desk Lamp", glyph: "💡", kind: "research", tier: 1, unit: 6, costUnit: 0.5 },
+  toolcaddy: { name: "Tool Caddy", glyph: "🧰", kind: "build", tier: 1, unit: 6, costUnit: 0.5 },
+  bonsai: { name: "Bonsai Tree", glyph: "🌳", kind: "income", tier: 4, unit: 8, costUnit: 0.7 },
+  lavalamp: { name: "Lava Lamp", glyph: "🔦", kind: "research", tier: 4, unit: 8, costUnit: 0.7 },
+  powerdrill: { name: "Power Drill", glyph: "🛠️", kind: "build", tier: 4, unit: 8, costUnit: 0.7 },
+  crystal: { name: "Crystal Orb", glyph: "🔮", kind: "research", tier: 7, unit: 11, costUnit: 0.9 },
+  fern: { name: "Giant Fern", glyph: "🪴", kind: "income", tier: 7, unit: 11, costUnit: 0.9 },
+};
+export const MOD_ORDER = ["plant", "lamp", "toolcaddy", "bonsai", "lavalamp", "powerdrill", "fern", "crystal"];
+export function modFlat(type) { const m = MODS[type]; return m ? m.unit * tierPower(m.tier) : 0; }
+export function modPrice(type) { const m = MODS[type]; return m ? Math.ceil(m.costUnit * tierCost(m.tier)) : 0; }
+export function isModUnlocked(type, shared) { return MODS[type] && MODS[type].tier <= currentTier(shared); }
+// Sum of a furniture's mounted mods, by kind.
+export function modBonusOf(f) {
+  const out = { income: 0, research: 0, build: 0 };
+  for (const type of Object.values(f.mods || {})) { const m = MODS[type]; if (m) out[m.kind] += modFlat(type); }
+  return out;
+}
+// Sum of mod bonuses from every furniture the player is adjacent to.
+export function nearbyModBonus(me, shared) {
+  const out = { income: 0, research: 0, build: 0 };
+  if (!shared || !shared.furniture || !me.pos) return out;
+  for (const [key, f] of Object.entries(shared.furniture)) {
+    if (!f.mods) continue;
+    const [gx, gy] = key.split(",").map(Number);
+    if (isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange, f.rot || 0)) {
+      const b = modBonusOf(f); out.income += b.income; out.research += b.research; out.build += b.build;
+    }
+  }
+  return out;
 }
 
 // ---- gear / items (tiered) ------------------------------------------------
@@ -311,7 +356,10 @@ export function income(me, shared, { passiveOnly = false } = {}) {
   if (!passiveOnly && shared && shared.furniture && me.pos) {
     for (const [key, f] of Object.entries(shared.furniture)) {
       const [gx, gy] = key.split(",").map(Number);
-      if (isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange)) flat += scaleByTag(furnitureValue(f), FURNITURE[f.type].tag, sc);
+      if (isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange, f.rot || 0)) {
+        flat += scaleByTag(furnitureValue(f), FURNITURE[f.type].tag, sc);
+        flat += modBonusOf(f).income; // node mods (plants) = flat income
+      }
     }
   }
   if (shared && shared.pot && shared.pot.roomBuff && shared.pot.roomBuff.incomeMult) multPct += shared.pot.roomBuff.incomeMult;
@@ -325,7 +373,7 @@ export function effectiveSpeedMult(me) {
 export function usingKeys(pos, shared) {
   const keys = [];
   if (!shared || !shared.furniture || !pos) return keys;
-  for (const [key, f] of Object.entries(shared.furniture)) { const [gx, gy] = key.split(",").map(Number); if (isNearFootprint(pos, f.type, gx, gy, TUNING.adjacencyRange)) keys.push(key); }
+  for (const [key, f] of Object.entries(shared.furniture)) { const [gx, gy] = key.split(",").map(Number); if (isNearFootprint(pos, f.type, gx, gy, TUNING.adjacencyRange, f.rot || 0)) keys.push(key); }
   return keys;
 }
 export function isUsing(pos, gx, gy) {
@@ -343,9 +391,10 @@ export function canExpand(shared) { return shared.floor.w < TUNING.maxFloor; }
 
 // ---- BUILD + BRAIN --------------------------------------------------------
 
-export function buildPower(me) {
+export function buildPower(me, shared) {
   let p = TUNING.baseBuild + TUNING.buildScale * ((me.stats && me.stats.build) || 0);
   for (const def of equippedDefs(me)) if (def.buildBonus) p += def.buildBonus;
+  if (shared) p += nearbyModBonus(me, shared).build; // node mods (tools) = flat build
   return p;
 }
 export function rpRate(me, shared) {
@@ -355,9 +404,10 @@ export function rpRate(me, shared) {
   for (const [key, f] of Object.entries(shared.furniture)) {
     const [gx, gy] = key.split(",").map(Number);
     const def = FURNITURE[f.type];
-    // research scales with the furniture's TIER (not its factorial income), so
-    // early research isn't glacial and late research isn't instant.
-    if (def.tag === "brain" && isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange)) rp += (def.tier + 0.5 * (f.level - 1)) * TUNING.researchScale * (1 + brain * TUNING.researchStatBonus);
+    if (!isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange, f.rot || 0)) continue;
+    // research scales with the furniture's TIER (not its factorial income).
+    if (def.tag === "brain") rp += (def.tier + 0.5 * (f.level - 1)) * TUNING.researchScale * (1 + brain * TUNING.researchStatBonus);
+    rp += modBonusOf(f).research; // node mods (lamps) = flat research
   }
   for (const def of equippedDefs(me)) if (def.researchBonus) rp += def.researchBonus;
   return Math.round(rp * 100) / 100;
@@ -412,7 +462,7 @@ export function soulRate(me, shared) {
   for (const [key, f] of Object.entries(shared.furniture)) {
     const [gx, gy] = key.split(",").map(Number);
     const def = FURNITURE[f.type];
-    if (def.soul && isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange)) base += def.soul * (1 + 0.5 * (f.level - 1));
+    if (def.soul && isNearFootprint(me.pos, f.type, gx, gy, TUNING.adjacencyRange, f.rot || 0)) base += def.soul * (1 + 0.5 * (f.level - 1));
   }
   if (base <= 0) return 0;
   let mult = 1;

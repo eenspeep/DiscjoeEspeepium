@@ -4,6 +4,20 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Shapes, rotation, node mods — SHIPPED
+Arbitrary (cell-list) furniture footprints incl. an L-Desk, rendered as a real
+extruded shape; **R** rotates a piece through 4 orientations while placing.
+**Node mods** mount on surface furniture tiles (one per tile): plant → flat
+income, lamp → flat research, tool → flat build, in basic/advanced/exotic tiers.
+Mods are FLAT only (magnitude scales with the mod's own tier) and apply while
+you're adjacent to the host furniture.
+
+OPEN / owner to confirm: furniture should provide the **multipliers** (tier +
+upgrade) while mods stay flat. Furniture currently gives flat income that scales
+factorially by tier+upgrade (additive, not a true ×multiplier). Converting to
+literal multiplicative furniture is a separate rebalance that would redo the
+15-min/5-min calibration — pending the owner's go-ahead.
+
 ## 2026-09-15 — Owner directives (deferred, implement when we return)
 
 ### 1. Shop = 10 tiers, factorial scaling (MOST IMPORTANT) — SHIPPED 2026-09-16
