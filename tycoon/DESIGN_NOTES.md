@@ -4,6 +4,33 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Combat + Garlic Charlie — SHIPPED
+Attacks are instant kills at melee range, so fleeing works. **Q** swings your
+equipped **weapon** (you can only attack with one in the hand slot); the tier-1
+**Knife** breaks after one swing, kill or miss. Higher tiers (Machete, Katana)
+last more swings. **Shields** are gear that occupy a normal slot (tier 1 = torso,
+each higher tier opens a shield for another slot). A shield eats one lethal hit
+and the **lowest-value** one shatters, so stacking shields = more hits absorbed.
+
+On death an entity **drops all its gear** as a ground pile (📦, click to grab
+what fits); **coins go straight to the killer**. **Players don't respawn** — you
+remake your Joey (gear stays on the floor for others). Every kill adds a **black
+mark**: the first is a free warning, each one after eats a bag slot, and marks
+can exceed your bag size (a bigger bag just reveals more) so you can't bag your
+way out. Kills also nudge `soulMult`. A buyable **Church of the Cat God Enzo**
+for forgiveness is still TODO — for now marks are permanent.
+
+All ambient bots are gone except **Garlic Charlie**: one wanderer (🧄) who
+donates a trickle to the team pot (his "10%"), votes arbitrarily, buys the odd
+cheap piece of furniture at far-apart intervals, and **respawns once an hour**
+after someone guts him for a coin bounty + loot. His pot donation, voting,
+buying, and respawn are host-driven so they happen once.
+
+Multiplayer combat is trust-based like the rest: attacks and kills are relayed
+peer-to-peer (`attack`/`attackResult` messages), the victim's own client
+resolves shield-vs-death and reports coins back. Not griefing-hardened yet (no
+cooldown, cost floor, or safe zone beyond the weapon-breaks-per-hit economy).
+
 ## 2026-09-16 — Rooms + lockable doors — SHIPPED
 The office is no longer a grow-a-rectangle. It's a set of rectangular rooms
 joined by 1-wide hallways. **Add Room** (build bar) spends a factorially-growing
@@ -103,10 +130,7 @@ clients).
 
 ### 5. Still queued from the earlier feature batch
 - **Rooms + lockable doors** — SHIPPED 2026-09-16 (see top of file).
-- **Combat + Garlic Charlie**: single wandering bot (invests 10%, votes
-  randomly); buyable knife that instakills a player/bot; you take their whole
-  inventory, the rest drops to the floor to grab; killing adds an immovable
-  **black mark** to your bag that overflows into gear slots (feet → up) when the
-  bag is full; **benadryl** (expensive) removes one; more bots every 10
-  expansions. Discuss **griefing guardrails** before building (cost/cooldown/
-  safe zone / opt-in PvP).
+- **Combat + Garlic Charlie** — SHIPPED 2026-09-16 (see top of file). Deferred
+  bits from the original ask: a forgiveness mechanic (church of the Cat God Enzo
+  / benadryl) to clear black marks, more bots as the office scales, and real
+  griefing guardrails (cooldown, cost floor, safe zone, opt-in PvP).

@@ -19,6 +19,7 @@ import {
   currentTier, nextTier, researchTotal, siteProgress, tierPower, TIER_COUNT,
   esoOfItem, esoOfFurniture, currentEso, nextEso, ESO_MAX, ESO_NAME,
   MODS, MOD_ORDER, modPrice, isModUnlocked,
+  blackMarkCells, blackMarkSlots,
 } from "./economy.js";
 import { BASE_LOOK, drawJoey, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setSelected, unlockDoorLocal } from "./world.js";
@@ -47,8 +48,13 @@ export function initUI(authApi) {
   setInterval(() => {
     if (state.justBuilt) { flash("Built: " + state.justBuilt + "!"); state.justBuilt = null; }
     if (state.justCrafted) { flash("Crafted: " + state.justCrafted + " — in your bag."); state.justCrafted = null; }
-  }, 500);
+    if (state.justBlocked) { flash("🛡️ Blocked " + state.justBlocked.by + " — your " + state.justBlocked.shield + " shattered!"); state.justBlocked = null; }
+    if (state.justFirstKill) { flash("⚠️ First kill — a warning. Kill again and black marks eat your bag."); state.justFirstKill = null; }
+    if (state.justBlackMark) { flash("🖤 A black mark stains your soul — a bag slot is lost."); state.justBlackMark = null; }
+    if (state.justKilled) { flash("☠️ Killed by " + state.justKilled + ". Your gear dropped where you fell. Build a new Joey."); state.justKilled = null; closePanel(); ensureCreator(); }
+  }, 400);
 }
+function ensureCreator() { if (!state.me.created && !document.querySelector(".modal-back")) openCreator(); }
 
 function researchTitle() {
   const nt = nextTier(state.shared);
@@ -100,7 +106,7 @@ function renderHud() {
       el("span", { class: "badge muted", text: "👥 " + (state.peers.length + 1) }),
       el("button", { class: "btn", onclick: toggleLocker }, ["Locker"]),
       el("button", { class: "btn" + (voting ? " alert" : ""), onclick: togglePot }, [voting ? "Vote!" : "Team Pot"]),
-      el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · stand by furniture to use it · Locker for gear & bag · Team Pot to invest"), title: "Help" }, ["?"]),
+      el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · E shove · Q attack (need a weapon in hand) · click a 📦 to grab loot · stand by furniture to use it"), title: "Help" }, ["?"]),
     ])
   );
 }
@@ -218,6 +224,8 @@ function renderDoor() {
 function toggleLocker() { if (openView === "locker") return closePanel(); openView = "locker"; setSelected(null); renderLocker(); showPanel(); }
 
 function itemBuffText(def) {
+  if (def.weapon) return "🔪 instant kill · " + def.uses + " use" + (def.uses > 1 ? "s" : "");
+  if (def.shield) return "🛡️ blocks 1 hit";
   if (def.value) return "+" + fmt(Math.round(def.value * tierPower(def.tier) * 100) / 100) + "/s" + (def.tag && def.tag !== "neutral" ? " " + def.tag[0].toUpperCase() : "");
   if (def.mult) return "+" + Math.round(def.mult * 100) + "%";
   if (def.speedMult) return "+" + Math.round(def.speedMult * 100) + "% spd";
@@ -254,7 +262,8 @@ function renderLocker() {
 
   // bag grid
   const grid = bagGrid(me);
-  kids.push(el("div", { class: "ward-label", text: "Bag · " + grid.w + "×" + grid.h + " · " + bagFreeCells(me) + " free" }));
+  const marks = blackMarkSlots(me);
+  kids.push(el("div", { class: "ward-label", text: "Bag · " + grid.w + "×" + grid.h + " · " + bagFreeCells(me) + " free" + (marks ? " · 🖤 " + marks + " black mark" + (marks > 1 ? "s" : "") : "") }));
   kids.push(renderBag(me, grid));
 
   // selected-item actions
@@ -339,15 +348,17 @@ function renderBag(me, grid) {
     }
     anchor.set(id, ax + "," + ay);
   }
+  const black = blackMarkCells(me);
   const wrap = el("div", { class: "bag-grid", style: `grid-template-columns:repeat(${grid.w},34px);grid-template-rows:repeat(${grid.h},34px)` });
   for (let y = 0; y < grid.h; y++) for (let x = 0; x < grid.w; x++) {
     const key = x + "," + y, id = cellMap.get(key), inst = id && me.items[id], def = inst && ITEMS[inst.type];
     const isAnchor = id && anchor.get(id) === key;
+    const isBlack = !id && black.has(key);
     const cell = el("button", {
-      class: "bag-cell" + (id ? " occ" : "") + (id && id === selBagItem ? " sel" : "") + (def && def.immovable ? " immov" : ""),
+      class: "bag-cell" + (id ? " occ" : "") + (isBlack ? " black" : "") + (id && id === selBagItem ? " sel" : "") + (def && def.immovable ? " immov" : ""),
       style: def ? `background:${def.color}` : "",
-      onclick: () => onBagCell(x, y, id),
-    }, [isAnchor ? el("span", { class: "bag-glyph", text: def.glyph }) : null]);
+      onclick: () => { if (isBlack) return flash("A black mark — only the Cat God Enzo can clear it (church coming soon)."); onBagCell(x, y, id); },
+    }, [isBlack ? el("span", { class: "bag-glyph", text: "✖" }) : (isAnchor ? el("span", { class: "bag-glyph", text: def.glyph }) : null)]);
     wrap.appendChild(cell);
   }
   return wrap;

@@ -7,11 +7,11 @@ import { drawJoey, lookFromSeed, shade } from "./appearance.js";
 import {
   FURNITURE, MODS, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isNearFootprint,
   footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt, hasSurface,
-  walkableSet, isWalkable, inHall, doorPassable,
+  walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
 } from "./economy.js";
-import { TUNING } from "./config.js";
+import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, useWeapon, killCharlie, tryPickup, isCharlieAlive } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
@@ -30,8 +30,8 @@ let mouse = { sx: 0, sy: 0, gx: 0, gy: 0, over: false };
 let target = null;
 let selectedKey = null;
 const renderPeers = new Map();
-const NPC_NAMES = ["JOEY BOT", "JOE-9000", "JOEBOT", "AUTO-JOE", "PROXY JOE"];
-const npcs = makeNPCs(3);
+const charlie = makeCharlie();
+function activeBots() { return isCharlieAlive() ? [charlie] : []; }
 let lastFrame = now();
 
 export function initWorld(canvasEl, hooks = {}) {
@@ -49,6 +49,7 @@ export function initWorld(canvasEl, hooks = {}) {
     if (e.target.tagName === "INPUT") return;
     const k = e.key.toLowerCase();
     if (k === "e") { doPush(); return; }
+    if (k === "q") { doAttack(); return; }
     if (k === "r" && buildType) { buildRot = (buildRot + 1) % 4; return; }
     keys.add(k);
   });
@@ -114,6 +115,12 @@ function onClick() {
     else onTileMessage("Build started — stand next to it to build it.");
     return;
   }
+  const pile = state.shared.loot && state.shared.loot[doorKey];
+  if (pile && pile.items && pile.items.length) {
+    const r = tryPickup(gx, gy);
+    onTileMessage(r.ok ? ("Grabbed " + r.taken + " item" + (r.taken > 1 ? "s" : "") + (r.left ? " (" + r.left + " left, bag full)" : "") + ".") : "Your bag's too full.");
+    return;
+  }
   if (fKey) { onFurnitureClick(fKey, state.shared.furniture[fKey]); return; }
   if (sKey) { onSiteClick(sKey, state.shared.sites[sKey]); return; }
   if (isWalkable(state.shared, gx, gy)) target = { x: gx, y: gy };
@@ -125,7 +132,7 @@ function doPush() {
   if (!state.me.created) return;
   const cands = [];
   for (const [id, r] of renderPeers) cands.push({ kind: "peer", id, x: r.x, y: r.y, name: r.name });
-  for (const n of npcs) cands.push({ kind: "npc", ref: n, x: n.x, y: n.y, name: n.name });
+  for (const n of activeBots()) cands.push({ kind: "npc", ref: n, x: n.x, y: n.y, name: n.name });
   let best = null, bd = 1.6;
   for (const c of cands) { const d = Math.hypot(c.x - state.me.pos.x, c.y - state.me.pos.y); if (d < bd) { bd = d; best = c; } }
   if (!best) return onTileMessage("No one close enough to shove.");
@@ -142,6 +149,28 @@ function doPush() {
   onTileMessage("Shoved " + (best.name || "them") + "!");
 }
 
+// Swing your equipped weapon at the nearest adjacent entity. Instant kill if
+// they have no shield; the weapon breaks either way (a knife after one swing).
+function doAttack() {
+  if (!state.me.created) return;
+  if (!equippedWeapon(state.me)) return onTileMessage("You need a weapon in hand. Buy a knife and equip it.");
+  const cands = [];
+  for (const [id, r] of renderPeers) cands.push({ kind: "peer", id, x: r.x, y: r.y, name: r.name });
+  for (const n of activeBots()) cands.push({ kind: "bot", ref: n, x: n.x, y: n.y, name: n.name });
+  let best = null, bd = TUNING.attackRange;
+  for (const c of cands) { const d = Math.hypot(c.x - state.me.pos.x, c.y - state.me.pos.y); if (d <= bd) { bd = d; best = c; } }
+  if (!best) return onTileMessage("Nothing in knife reach.");
+  const def = useWeapon();   // breaks whether or not it kills
+  const wname = def ? def.name : "weapon";
+  if (best.kind === "bot") {
+    const r = killCharlie(best.ref.x, best.ref.y);
+    onTileMessage(r.ok ? ("You gutted Garlic Charlie! +" + r.bounty + "¢ — your " + wname + " broke.") : "He slipped away.");
+  } else {
+    if (sendMsg) sendMsg({ type: "attack", to: best.id, from: state.me.id, name: state.me.created ? state.me.name : "someone" });
+    onTileMessage("You lunged at " + (best.name || "them") + " — your " + wname + " broke.");
+  }
+}
+
 // Received a push (from another player) — move me.
 export function applyPush(x, y) {
   if (!state.me || !state.me.created) return;
@@ -156,7 +185,7 @@ export function applyPush(x, y) {
 function entityTileSet(excludeMe = true) {
   const s = new Set();
   for (const [, r] of renderPeers) s.add(Math.round(r.x) + "," + Math.round(r.y));
-  for (const n of npcs) s.add(Math.round(n.x) + "," + Math.round(n.y));
+  for (const n of activeBots()) s.add(Math.round(n.x) + "," + Math.round(n.y));
   return s;
 }
 
@@ -211,10 +240,14 @@ function updatePeers(dt) {
 
 function updateNPCs(dt) {
   const s = state.shared, walk = walkableSet(s), blocked = blockedTiles(s), doors = s.doors || {};
+  const alive = isCharlieAlive();
+  if (alive && !charlie._alive) { const r0 = s.rooms[0]; charlie.x = r0.x + 1; charlie.y = r0.y + 1; charlie.target = null; charlie.pause = 1; }
+  charlie._alive = alive;
+  if (!alive) return;
   const solid = (gx, gy) => { const k = gx + "," + gy; if (!walk.has(k) || blocked.has(k)) return true; const d = doors[k]; return !!(d && d.locked); };
   let walkList = null;
   const pick = () => { if (!walkList) walkList = [...walk].map((k) => k.split(",").map(Number)).filter(([x, y]) => !solid(x, y)); return walkList.length ? walkList[Math.floor(Math.random() * walkList.length)] : null; };
-  for (const n of npcs) {
+  for (const n of activeBots()) {
     n.pause -= dt;
     if (!n.target && n.pause <= 0) { const t = pick(); if (t) n.target = { x: t[0], y: t[1] }; }
     if (n.target && n.pause <= 0) {
@@ -232,13 +265,8 @@ function updateNPCs(dt) {
   }
 }
 
-function makeNPCs(count) {
-  const arr = [];
-  for (let i = 0; i < count; i++) {
-    const seed = "npc-" + i;
-    arr.push({ id: seed, x: 1 + i, y: 1 + i, target: null, pause: Math.random() * 3, moving: false, look: lookFromSeed(seed), name: NPC_NAMES[i % NPC_NAMES.length] });
-  }
-  return arr;
+function makeCharlie() {
+  return { id: CHARLIE_ID, x: 2, y: 2, target: null, pause: Math.random() * 3, moving: false, _alive: true, look: lookFromSeed("garlic-charlie-vii"), name: "GARLIC CHARLIE" };
 }
 
 // ---- loop + render --------------------------------------------------------
@@ -308,18 +336,37 @@ function draw(t) {
     const [dx, dy] = key.split(",").map(Number);
     items.push({ depth: dx + dy - 0.05, kind: "door", dx, dy, d, key });
   }
+  for (const [key, pile] of Object.entries(s.loot || {})) {
+    if (!pile.items || !pile.items.length) continue;
+    const [lx, ly] = key.split(",").map(Number);
+    items.push({ depth: lx + ly - 0.03, kind: "loot", lx, ly, pile });
+  }
   items.push({ depth: state.me.pos.x + state.me.pos.y, kind: "me" });
   for (const [, r] of renderPeers) items.push({ depth: r.x + r.y, kind: "peer", r });
-  for (const n of npcs) items.push({ depth: n.x + n.y, kind: "npc", n });
+  for (const n of activeBots()) items.push({ depth: n.x + n.y, kind: "npc", n });
   items.sort((a, b) => a.depth - b.depth);
 
   for (const it of items) {
     if (it.kind === "furn") drawFurniture(it.ax, it.ay, it.f, it.key === selectedKey, inUse.has(it.key));
     else if (it.kind === "site") drawSite(it.ax, it.ay, it.site);
     else if (it.kind === "door") drawDoor(it.dx, it.dy, it.d);
+    else if (it.kind === "loot") drawLoot(it.lx, it.ly, it.pile);
     else if (it.kind === "me") drawMe(t);
     else if (it.kind === "peer") drawPeer(it.r, t);
     else if (it.kind === "npc") drawPeer(it.n, t, true);
+  }
+}
+
+function drawLoot(gx, gy, pile) {
+  const p = project(gx, gy, canvas);
+  ctx.font = `${17 * camera.zoom}px system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  const bob = Math.sin((now() / 400) + gx + gy) * 1.5 * camera.zoom;
+  ctx.fillText("📦", p.x, p.y - 5 * camera.zoom + bob);
+  if (pile.items.length > 1) {
+    ctx.font = `${10 * camera.zoom}px system-ui, sans-serif`;
+    ctx.fillStyle = "rgba(20,22,28,0.85)";
+    ctx.fillText("×" + pile.items.length, p.x + 11 * camera.zoom, p.y + 4 * camera.zoom);
   }
 }
 
@@ -450,9 +497,13 @@ function drawMe(t) {
 
 function drawPeer(r, t, isNpc = false) {
   const p = project(r.x, r.y, canvas);
-  if (isNpc) ctx.globalAlpha = 0.9;
+  if (isNpc) ctx.globalAlpha = 0.95;
   drawJoey(ctx, p.x, p.y, { look: r.look, worn: r.worn || {}, scale: camera.zoom, walking: r.moving, t, name: r.name || "JOEY" });
   ctx.globalAlpha = 1;
+  if (r.id === CHARLIE_ID) {
+    ctx.font = `${15 * camera.zoom}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+    ctx.fillText("🧄", p.x, p.y - 52 * camera.zoom);
+  }
 }
 
 // FYI to whoever is standing where — presence payload.

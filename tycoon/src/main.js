@@ -4,7 +4,7 @@
 import { ECON_TICK_MS, TUNING } from "./config.js";
 import { uid } from "./util.js";
 import { connectNet } from "./net/net.js";
-import { state, initState, tickEconomy, flushShared, saveMe, setAccount, adoptProfile, setProfileSaver } from "./state.js";
+import { state, initState, tickEconomy, flushShared, saveMe, setAccount, adoptProfile, setProfileSaver, receiveAttack, applyKillReward } from "./state.js";
 import { hasSupabase, currentUser, signIn, signUp, signOut, loadProfile, saveProfile } from "./account.js";
 import { initWorld, myPresence, applyPush } from "./world.js";
 import { initUI, openFurniture, openSite, openDoor, flash, showOffline } from "./ui.js";
@@ -37,7 +37,17 @@ async function boot() {
   });
   initUI({ enabled: hasSupabase(), signIn, signUp, applyAuthed, doLogout });
 
-  if (net.onMessage) net.onMessage((m) => { if (m && m.type === "push" && m.to === myId) applyPush(m.x, m.y); });
+  if (net.onMessage) net.onMessage((m) => {
+    if (!m || m.to !== myId) return;
+    if (m.type === "push") applyPush(m.x, m.y);
+    else if (m.type === "attack") {
+      const res = receiveAttack(m.name);
+      if (res && !res.ignore && net.send) net.send({ type: "attackResult", to: m.from, blocked: res.blocked, killed: res.killed, coins: res.coins, name: state.me.created ? state.me.name : "someone" });
+    } else if (m.type === "attackResult") {
+      if (m.blocked) flash("They blocked it — your weapon still broke.");
+      else if (m.killed) { applyKillReward(m.coins, m.name); flash("You killed " + (m.name || "them") + "! Took " + (m.coins || 0) + "¢."); }
+    }
+  });
 
   flushShared(true);
   if (state.lastOffline) showOffline(state.lastOffline);

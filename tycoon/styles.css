@@ -367,6 +367,7 @@ body {
 .bag-cell.occ { border-color: rgba(0,0,0,0.15); box-shadow: inset 0 0 0 1px rgba(255,255,255,0.25); }
 .bag-cell.sel { outline: 3px solid var(--gold); outline-offset: -3px; }
 .bag-cell.immov { cursor: not-allowed; }
+.bag-cell.black { background: #1c1c22; color: #6a6a78; border-color: #000; cursor: not-allowed; }
 .bag-glyph { font-size: 16px; filter: drop-shadow(0 1px 1px rgba(0,0,0,0.3)); }
 .sel-info { margin-top: 8px; }
 
