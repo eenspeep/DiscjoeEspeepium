@@ -15,8 +15,8 @@ import {
   buildPower, rpRate, soulRate, siteProgress, isNearFootprint,
   currentTier, currentEso, furnitureTier, itemTier, esoOfFurniture, esoOfItem,
   footprintCells, blockedTiles, furnitureAnchorAt, hasSurface, isModUnlocked, modPrice,
-  equippedWeapon, lowestShield, blackMarkCells,
-  buildRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal, withinReach,
+  equippedWeapon, lowestShield, equippedShields, blackMarkCells,
+  buildRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal, withinReach, repairCost,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -158,7 +158,7 @@ function defaultShared() {
   furniture[`1,1`] = { type: "chair", level: 1, by: [] };
   furniture[`2,1`] = { type: "workbench", level: 1, by: [] };
   furniture[`1,2`] = { type: "snacktable", level: 1, by: [] };
-  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, sites: {}, loot: {}, owed: {}, charlie: { alive: true, diedAt: null, lastBuy: now() }, research: { contrib: {} }, pot: defaultPot() };
+  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now() }, research: { contrib: {} }, pot: defaultPot() };
 }
 function healShared(s) {
   if (!s.rooms) { const w = (s.floor && s.floor.w) || 9, h = (s.floor && s.floor.h) || 9; s.rooms = [{ x: 0, y: 0, w, h }]; }
@@ -170,6 +170,7 @@ function healShared(s) {
   if (!s.sites) s.sites = {};
   if (!s.loot) s.loot = {};
   if (!s.owed) s.owed = {};
+  if (!s.monsters) s.monsters = {};
   if (!s.charlie) s.charlie = { alive: true, diedAt: null, lastBuy: now() };
   if (!s.research) s.research = { contrib: {} };
   if (!s.research.contrib) s.research.contrib = {};
@@ -238,6 +239,7 @@ export function tickEconomy() {
   }
   potTick(t);
   charlieTick(t);
+  monsterTick(t);
 }
 
 // Advance construction sites you're helping, research from BRAIN furniture, and
@@ -655,6 +657,142 @@ function charlieTick(t) {
     pot.votes[CHARLIE_ID] = PROPOSALS[Math.floor(Math.random() * PROPOSALS.length)].id; state.dirty = true;
   }
   charlieMaybeBuy(t);
+}
+
+// ---- rats + monsters ------------------------------------------------------
+// Monsters live in shared state and are simulated by the host. They walk to the
+// nearest player or furniture and attack: furniture breaks (needs repair), a
+// player loses armor or dies. Player-damage to a remote peer is relayed like PvP.
+
+const SHIELD_TYPES = Object.keys(ITEMS).filter((t) => ITEMS[t].shield);
+let monsterSend = null;
+export function setMonsterSender(fn) { monsterSend = fn; }
+export function monsterList() { return Object.values((state.shared && state.shared.monsters) || {}); }
+function aliveRats() { return monsterList().filter((m) => m.kind === "rat").length; }
+function hasKing() { return monsterList().some((m) => m.kind === "king"); }
+function randInt(a, b) { return a + Math.floor(Math.random() * (b - a + 1)); }
+
+function spawnRat(x, y) {
+  const s = state.shared; s.monsters = s.monsters || {};
+  if (aliveRats() >= TUNING.ratMaxAlive) { formRatKing(); return; }   // the swarm coalesces
+  const armor = Math.random() < TUNING.ratArmorChance ? SHIELD_TYPES[Math.floor(Math.random() * SHIELD_TYPES.length)] : null;
+  const id = "rat-" + uid();
+  s.monsters[id] = { id, kind: "rat", x, y, attacks: 0, guard: armor ? 1 : 0, armor, cool: 0 };
+  state.dirty = true;
+}
+function formRatKing() {
+  const s = state.shared; s.monsters = s.monsters || {};
+  if (hasKing()) return;
+  const rats = monsterList().filter((m) => m.kind === "rat");
+  let sx = 0, sy = 0; for (const r of rats) { sx += r.x; sy += r.y; }
+  const n = rats.length || 1;
+  for (const r of rats) delete s.monsters[r.id];
+  const id = "king-" + uid();
+  s.monsters[id] = { id, kind: "king", x: sx / n, y: sy / n, attacks: 0, guard: TUNING.kingGuard, armor: null, cool: 0 };
+  state.dirty = true; state.justRatKing = true;
+}
+
+// Instant-use rat egg: buy it, a rat pops out next to you.
+export function tryBuyRatEgg() {
+  if (state.me.credits < TUNING.ratEggCost) return { ok: false, why: "Not enough credits." };
+  spend(TUNING.ratEggCost);
+  const p = state.me.pos; spawnRat(p.x + (Math.random() * 2 - 1), p.y + (Math.random() * 2 - 1));
+  commit();
+  return { ok: true };
+}
+export function tryRepairFurniture(key) {
+  const s = state.shared, f = s.furniture[key]; if (!f || !f.broken) return { ok: false, why: "Nothing to repair." };
+  const cost = repairCost(f);
+  if (state.me.credits < cost) return { ok: false, why: "Repair costs " + cost + "." };
+  spend(cost); f.broken = false; commit();
+  return { ok: true, cost };
+}
+
+// A player struck a monster (from world.doAttack). Its armor eats a hit; else it
+// dies, dropping coins to the killer (+ its armor, if any).
+export function hitMonster(id) {
+  const s = state.shared, m = s.monsters && s.monsters[id]; if (!m) return { ok: false };
+  const key = Math.round(m.x) + "," + Math.round(m.y);
+  if (m.guard > 0) {
+    m.guard -= 1;
+    if (m.kind === "rat" && m.armor) { addLoot(key, [m.armor]); m.armor = null; }
+    commit();
+    return { ok: true, blocked: true, king: m.kind === "king", guard: m.guard };
+  }
+  const coins = m.kind === "king" ? randInt(TUNING.kingCoinMin, TUNING.kingCoinMax) : randInt(TUNING.ratCoinMin, TUNING.ratCoinMax);
+  state.me.credits = round2(state.me.credits + coins); state.meDirty = true;
+  if (m.armor) addLoot(key, [m.armor]);
+  delete s.monsters[id];
+  commit();
+  return { ok: true, killed: true, coins, king: m.kind === "king" };
+}
+
+// This player was hit by a monster: lose the lowest 1 (rat) or 2 (king) shields,
+// or die if you don't have that many.
+export function receiveMonsterHit(king) {
+  const me = state.me; if (!me || !me.created) return;
+  const need = king ? 2 : 1;
+  const shields = equippedShields(me).slice().sort((a, b) => a.value - b.value);
+  if (shields.length >= need) {
+    for (let i = 0; i < need; i++) { const sh = shields[i]; delete me.items[sh.uid]; me.equipment[sh.slot] = null; }
+    state.justMonsterBlock = { by: king ? "The Rat King" : "a rat", n: need };
+    state.meDirty = true; saveMe(); notify();
+  } else {
+    killMe(king ? "the Rat King" : "a rat");
+  }
+}
+
+function monsterTargets() {
+  const s = state.shared, out = [];
+  if (state.me.created) out.push({ type: "player", id: state.me.id, x: state.me.pos.x, y: state.me.pos.y, me: true });
+  for (const p of state.peers) if (p.x != null) out.push({ type: "player", id: p.id, x: p.x, y: p.y });
+  for (const [key, f] of Object.entries(s.furniture)) { if (f.broken) continue; const [gx, gy] = key.split(",").map(Number); out.push({ type: "furn", key, x: gx, y: gy }); }
+  return out;
+}
+function lockedDoorAt(s, x, y) { const d = s.doors && s.doors[x + "," + y]; return !!(d && d.locked); }
+function monsterAttack(m, tg) {
+  const s = state.shared, king = m.kind === "king";
+  if (tg.type === "furn") { const f = s.furniture[tg.key]; if (f) f.broken = true; }
+  else if (tg.type === "player") { if (tg.me) receiveMonsterHit(king); else if (monsterSend) monsterSend({ type: "monsterHit", to: tg.id, king }); }
+}
+
+let lastMonster = 0;
+function monsterTick(t) {
+  if (!state.isHost) return;
+  const s = state.shared; if (!s) return; s.monsters = s.monsters || {};
+  const dt = (t - (lastMonster || t)) / 1000; lastMonster = t;
+  if (dt <= 0 || dt > 3600) return;
+
+  // Rat Motel spawns (level-many rats per interval)
+  for (const [key, f] of Object.entries(s.furniture)) {
+    const def = FURNITURE[f.type];
+    if (!def || !def.ratSpawner || f.broken) continue;
+    if (!f.lastSpawn) { f.lastSpawn = t; continue; }
+    if (t - f.lastSpawn >= TUNING.ratSpawnMs) {
+      f.lastSpawn = t;
+      const [gx, gy] = key.split(",").map(Number);
+      for (let i = 0; i < (f.level || 1); i++) spawnRat(gx + (Math.random() * 2 - 1), gy + (Math.random() * 2 - 1));
+    }
+  }
+
+  const mons = monsterList(); if (!mons.length) return;
+  const targets = monsterTargets();
+  for (const m of mons) {
+    let best = null, bd = Infinity;
+    for (const tg of targets) { const d = Math.hypot(tg.x - m.x, tg.y - m.y); if (d < bd) { bd = d; best = tg; } }
+    if (!best) continue;
+    if (bd > 1.25) {
+      const step = TUNING.ratSpeed * dt, ddx = best.x - m.x, ddy = best.y - m.y, dist = Math.hypot(ddx, ddy) || 1;
+      const nx = m.x + (ddx / dist) * step, ny = m.y + (ddy / dist) * step, rx = Math.round(nx), ry = Math.round(ny);
+      if (isWalkable(s, rx, ry) && !lockedDoorAt(s, rx, ry)) { m.x = nx; m.y = ny; } else { m.x = m.x + (ddx / dist) * step * 0.0; }   // blocked (locked door): hold
+      state.dirty = true;
+    } else if (t - (m.cool || 0) >= TUNING.ratAttackMs) {
+      m.cool = t; monsterAttack(m, best); m.attacks = (m.attacks || 0) + 1;
+      if (m.kind === "rat" && m.attacks >= TUNING.ratAttacks) delete s.monsters[m.id];   // tired out
+      state.dirty = true;
+    }
+  }
+  if (t - (state._monFlush || 0) > 500) { state._monFlush = t; flushShared(true); }   // sync movement to peers
 }
 
 // ---- inventory actions ----------------------------------------------------

@@ -4,6 +4,25 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-16 — Rats + Rat King (monsters) — SHIPPED
+Monsters live in `shared.monsters`, host-simulated (`monsterTick`). They walk to
+the nearest player or furniture and attack once/sec, tiring (despawning) after 3
+attacks. Furniture hit goes **broken** (grays out, earns nothing, ⚠️) until
+repaired for `repairCost` = ½ base + ½ of every upgrade paid. A player hit loses
+their lowest shield, or dies if unarmored (relayed to remote peers via a
+`monsterHit` message, same trust model as PvP). Rats can't attack doors and are
+blocked by locked doors.
+
+Spawns: **Rat Egg** (instant shop buy → one rat by you) and **Rat Motel**
+(tier-3 furniture, spawns `level` rats every 10 min; upgrade for more). Rats are
+killable with a weapon (Q); they rarely spawn wearing a shield that absorbs a
+hit and drops as loot. A rat drops 1–1000 coins to its killer.
+
+Cap: only 10 rats alive — the 11th makes the swarm **coalesce into a Rat King**
+(guard 5, so 6 weapon hits to kill; drops 800–6000 coins). The king breaks your
+2 lowest shields per hit, or kills you with fewer than 2. Balance knobs are in
+TUNING (`rat*`, `king*`). Non-host peers see monster movement synced ~2×/sec.
+
 ## 2026-09-16 — Shop menu + place-in-hand (hotbar removed) — SHIPPED
 Replaced the long bottom build-hotbar with a **Shop panel** (🛒 button in the
 HUD). Everything buyable lives there now: furniture grouped by research tier,

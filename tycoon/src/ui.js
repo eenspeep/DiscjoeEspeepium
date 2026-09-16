@@ -9,6 +9,7 @@ import {
   tryBuyItem, equipItem, unequipItem, moveItem, rotateItem, trySellItem,
   cancelSite, cancelBuild,
   tryLockDoor, tryUnlockDoor, tryRemoveDoor, checkDoorPassword,
+  tryBuyRatEgg, tryRepairFurniture,
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
@@ -20,7 +21,7 @@ import {
   rpRate, soulRate, tierProgress, esoProgress,
   esoOfItem, esoOfFurniture, currentEso, nextEso, ESO_MAX, ESO_NAME,
   MODS, MOD_ORDER, modPrice, isModUnlocked,
-  blackMarkCells, blackMarkSlots, TRAITS,
+  blackMarkCells, blackMarkSlots, TRAITS, repairCost,
 } from "./economy.js";
 import { LOOK_PICKERS, lookColor, drawJoey, drawJoeySprite, defaultLook } from "./appearance.js";
 import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setSelected, unlockDoorLocal } from "./world.js";
@@ -54,6 +55,8 @@ export function initUI(authApi) {
     if (state.justFirstKill) { flash("⚠️ First kill — a warning. Kill again and black marks eat your bag."); state.justFirstKill = null; }
     if (state.justBlackMark) { flash("🖤 A black mark stains your soul — a bag slot is lost."); state.justBlackMark = null; }
     if (state.justRefund) { flash("💸 +" + fmt(state.justRefund) + " refunded to you (someone sold furniture you paid for)."); state.justRefund = null; }
+    if (state.justRatKing) { flash("👑🐀 The rats formed a RAT KING! 5 armor, and it smashes 2 of your shields per hit."); state.justRatKing = null; }
+    if (state.justMonsterBlock) { flash("🛡️ " + state.justMonsterBlock.by + " broke " + state.justMonsterBlock.n + " of your shields!"); state.justMonsterBlock = null; }
     if (state.justKilled) { flash("☠️ Killed by " + state.justKilled + ". Your gear dropped where you fell. Build a new Joey."); state.justKilled = null; closePanel(); ensureCreator(); }
   }, 400);
 }
@@ -187,6 +190,10 @@ function renderShop() {
     for (const t of modTypes) { const m = MODS[t], price = modPrice(t); kids.push(shopRow(m.glyph, m.name, "+" + fmt(m.unit * tierPower(m.tier)) + " flat " + m.kind, price, me.credits >= price, () => takeMod(t))); }
   }
 
+  // Monsters
+  kids.push(el("div", { class: "ward-label", text: "Monsters · unleash rats (they maul furniture + Joeys)" }));
+  kids.push(shopRow("🥚", "Rat Egg", "hatches one rat next to you, right now", TUNING.ratEggCost, me.credits >= TUNING.ratEggCost, () => { const r = tryBuyRatEgg(); flash(r.ok ? "🐀 A rat scurries out!" : (r.why || "Can't buy.")); if (r.ok) renderShop(); }));
+
   // Furniture by research tier
   kids.push(el("div", { class: "ward-label", text: "Furniture · research unlocks tiers" }));
   for (let t = 1; t <= TIER_COUNT; t++) {
@@ -197,7 +204,7 @@ function renderShop() {
       for (const ty of types) {
         const def = FURNITURE[ty], esoReq = esoOfFurniture(ty), cost = furnitureBuyCost(s, ty);
         const val = Math.round(furnitureValue({ type: ty, level: 1 }) * 100) / 100;
-        const meta = (def.soul ? "channel SOUL · " : "") + def.tag.toUpperCase() + " +" + fmt(val) + "/s · " + furnitureWork(ty) + "w";
+        const meta = def.ratSpawner ? "spawns rats every 10 min (upgrade = more)" : (def.soul ? "channel SOUL · " : "") + def.tag.toUpperCase() + " +" + fmt(val) + "/s · " + furnitureWork(ty) + "w";
         if (esoReq > currentEso(me)) {
           kids.push(shopRow("🔮", def.name, "🔮 " + ESO_NAME[esoReq] + " soul needed", cost, false, () => flash(def.name + " needs " + ESO_NAME[esoReq] + " soul. Channel at an esoteric altar."), "eso-locked"));
         } else {
@@ -223,15 +230,22 @@ function renderFurniture() {
   const [gx, gy] = openKey.split(",").map(Number);
   const prot = isProtected(state.shared, gx, gy);
   const iPaid = !f.paidBy || f.paidBy === state.me.id;
+  const actions = [];
+  if (f.broken) {
+    const rc = repairCost(f);
+    actions.push(el("button", { class: "btn primary" + (state.me.credits >= rc ? "" : " poor"), onclick: () => { const r = tryRepairFurniture(openKey); flash(r.ok ? def.name + " repaired." : (r.why || "Can't repair.")); } }, ["Repair — " + fmt(rc)]));
+  } else {
+    actions.push(el("button", { class: "btn primary" + (state.me.credits >= up ? "" : " poor"), onclick: () => { const r = tryUpgradeFurniture(openKey); flash(r.ok ? def.name + " upgraded." : (r.why || "Can't upgrade.")); } }, [(def.ratSpawner ? "More rats — " : "Upgrade — ") + fmt(up)]));
+  }
+  actions.push(el("button", { class: "btn", onclick: () => { const r = trySellFurniture(openKey); flash(!r.ok ? (r.why || "Can't sell.") : r.toOther ? "Sold — " + fmt(r.refund) + " returned to its buyer." : "Sold for " + fmt(r.refund) + "."); if (r.ok) closePanel(); } }, ["Sell"]));
+
   panel.replaceChildren(
     panelHeader(def.glyph + " " + def.name),
-    el("p", { class: "muted small", text: def.tag.toUpperCase() + " furniture. Buffs anyone standing next to it." }),
+    el("p", { class: "muted small", text: def.ratSpawner ? "Spawns " + f.level + " rat" + (f.level > 1 ? "s" : "") + " every 10 min. Upgrade for more." : def.tag.toUpperCase() + " furniture. Buffs anyone standing next to it." }),
+    f.broken ? el("p", { class: "broken-note small", text: "🐀 In disrepair after a rat attack — earns nothing until repaired." }) : null,
     prot ? el("p", { class: "muted small", text: iPaid ? "🛡️ Protected room — anyone can sell this, and the refund comes back to you (you paid for it)." : "🛡️ Protected room — anyone can sell this, and the refund goes back to whoever paid for it." }) : null,
     stat("Level", String(f.level)), stat("Base value", "+" + fmt(raw) + "/s"), stat("For you (stats)", "+" + fmt(Math.round(mine * 100) / 100) + "/s"),
-    el("div", { class: "panel-actions" }, [
-      el("button", { class: "btn primary" + (state.me.credits >= up ? "" : " poor"), onclick: () => { const r = tryUpgradeFurniture(openKey); flash(r.ok ? def.name + " upgraded." : (r.why || "Can't upgrade.")); } }, ["Upgrade — " + fmt(up)]),
-      el("button", { class: "btn", onclick: () => { const r = trySellFurniture(openKey); flash(!r.ok ? (r.why || "Can't sell.") : r.toOther ? "Sold — " + fmt(r.refund) + " returned to its buyer." : "Sold for " + fmt(r.refund) + "."); if (r.ok) closePanel(); } }, ["Sell"]),
-    ])
+    el("div", { class: "panel-actions" }, actions)
   );
 }
 

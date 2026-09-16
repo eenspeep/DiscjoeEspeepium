@@ -423,6 +423,7 @@ body {
 
 .login-modal .field { margin: 10px 0; }
 .login-err { color: var(--danger); min-height: 16px; margin: 4px 0; }
+.broken-note { color: var(--danger); font-weight: 600; margin: 4px 0; }
 
 @media (max-width: 560px) {
   .coin-amt { font-size: 22px; }
