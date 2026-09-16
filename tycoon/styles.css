@@ -407,3 +407,8 @@ body {
 .schip.soul { color: #7a3fb8; }
 .shop-row.eso-locked { opacity: 0.7; cursor: help; }
 .shop-row.eso-locked .shop-name { color: #7a3fb8; }
+
+/* ---- node mods in build bar -------------------------------------------- */
+.build-btn.mod { background: #f3ecfb; }
+.build-btn.mod.active { border-color: #7a3fb8; background: #ece0fb; }
+.build-sep { align-self: center; font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; padding: 0 2px; }

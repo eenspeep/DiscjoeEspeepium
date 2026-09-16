@@ -13,7 +13,7 @@ import {
   furnitureWork, itemWork, itemPrice, isFurnitureUnlocked, isItemUnlocked,
   buildPower, rpRate, soulRate, siteProgress, isNearFootprint,
   currentTier, currentEso, furnitureTier, itemTier, esoOfFurniture, esoOfItem,
-  footprintCells, blockedTiles,
+  footprintCells, blockedTiles, furnitureAnchorAt, hasSurface, isModUnlocked, modPrice,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -224,7 +224,7 @@ export function tickEconomy() {
 // Advance construction sites you're helping, research from BRAIN furniture, and
 // your personal gear build queue.
 function buildTick(dt) {
-  const me = state.me, s = state.shared, power = buildPower(me);
+  const me = state.me, s = state.shared, power = buildPower(me, s);
 
   for (const [key, site] of Object.entries(s.sites || {})) {
     const [gx, gy] = key.split(",").map(Number);
@@ -233,7 +233,7 @@ function buildTick(dt) {
     site.progBy[me.id] = round2((site.progBy[me.id] || 0) + power * dt);
     state.dirty = true;
     if (siteProgress(site) >= site.work) {
-      if (!s.furniture[key]) s.furniture[key] = { type: site.type, level: 1, by: Object.keys(site.progBy) };
+      if (!s.furniture[key]) s.furniture[key] = { type: site.type, level: 1, by: Object.keys(site.progBy), rot: site.rot || 0 };
       delete s.sites[key];
       state.justBuilt = FURNITURE[site.type] ? FURNITURE[site.type].name : site.type;
       flushShared(true);
@@ -296,11 +296,11 @@ export function income$() { return income(state.me, state.shared); }
 function spend(amt) { state.me.credits = round2(state.me.credits - amt); state.meDirty = true; }
 function commit() { state.dirty = true; flushShared(true); saveMe(); notify(); }
 
-export function tryPlaceFurniture(type, gx, gy) {
+export function tryPlaceFurniture(type, gx, gy, rot = 0) {
   const s = state.shared, key = `${gx},${gy}`;
   if (furnitureTier(type) > currentTier(s)) return { ok: false, why: "That tier isn't researched yet — use BRAIN furniture." };
   if (esoOfFurniture(type) > currentEso(state.me)) return { ok: false, why: "Not esoteric enough — channel SOUL at an altar." };
-  const cells = footprintCells(type, gx, gy);
+  const cells = footprintCells(type, gx, gy, rot);
   for (const [cx, cy] of cells) if (!inBounds(cx, cy)) return { ok: false, why: "It doesn't fit on the floor here." };
   const blocked = blockedTiles(s);
   for (const [cx, cy] of cells) if (blocked.has(cx + "," + cy)) return { ok: false, why: "That space is taken." };
@@ -309,9 +309,33 @@ export function tryPlaceFurniture(type, gx, gy) {
   const cost = furnitureBuyCost(s, type);
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
   spend(cost);
-  s.sites[key] = { type, work: furnitureWork(type), progBy: {}, started: now() };
+  s.sites[key] = { type, rot, work: furnitureWork(type), progBy: {}, started: now() };
   commit();
   return { ok: true, building: true };
+}
+
+export function tryPlaceMod(modType, gx, gy) {
+  const s = state.shared, fKey = furnitureAnchorAt(s, gx, gy);
+  if (!fKey) return { ok: false, why: "Mods go on furniture surfaces." };
+  const f = s.furniture[fKey];
+  if (!hasSurface(f.type)) return { ok: false, why: "That furniture has no surface." };
+  if (!isModUnlocked(modType, s)) return { ok: false, why: "That tier isn't researched yet." };
+  f.mods = f.mods || {};
+  const mk = gx + "," + gy;
+  if (f.mods[mk]) return { ok: false, why: "There's already a mod there." };
+  const price = modPrice(modType);
+  if (state.me.credits < price) return { ok: false, why: "Not enough credits." };
+  spend(price); f.mods[mk] = modType; commit();
+  return { ok: true };
+}
+export function tryRemoveMod(gx, gy) {
+  const s = state.shared, fKey = furnitureAnchorAt(s, gx, gy);
+  if (!fKey) return { ok: false };
+  const f = s.furniture[fKey], mk = gx + "," + gy;
+  if (!f.mods || !f.mods[mk]) return { ok: false };
+  const refund = Math.ceil(modPrice(f.mods[mk]) * 0.4);
+  delete f.mods[mk]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
+  return { ok: true, refund };
 }
 
 export function cancelSite(key) {

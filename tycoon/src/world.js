@@ -5,15 +5,17 @@
 import { TILE_W, TILE_H, camera, project, screenToGrid } from "./iso.js";
 import { drawJoey, lookFromSeed, shade } from "./appearance.js";
 import {
-  FURNITURE, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isNearFootprint,
-  footprintOf, footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt,
+  FURNITURE, MODS, usingKeys, wornArt, effectiveSpeedMult, siteProgress, isNearFootprint,
+  footprintCells, blockedTiles, furnitureAnchorAt, siteAnchorAt, hasSurface,
 } from "./economy.js";
 import { TUNING } from "./config.js";
 import { clamp, lerp, now } from "./util.js";
-import { state, inBounds, tryPlaceFurniture } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod } from "./state.js";
 
 let canvas, ctx, dpr = 1;
-let buildType = null;
+let buildType = null;   // furniture type being placed
+let buildMod = null;    // node-mod type being placed
+let buildRot = 0;       // rotation (0..3) for furniture placement
 let onFurnitureClick = () => {};
 let onSiteClick = () => {};
 let onTileMessage = () => {};
@@ -41,6 +43,7 @@ export function initWorld(canvasEl, hooks = {}) {
     if (e.target.tagName === "INPUT") return;
     const k = e.key.toLowerCase();
     if (k === "e") { doPush(); return; }
+    if (k === "r" && buildType) { buildRot = (buildRot + 1) % 4; return; }
     keys.add(k);
   });
   window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
@@ -63,8 +66,10 @@ export function initWorld(canvasEl, hooks = {}) {
   requestAnimationFrame(loop);
 }
 
-export function setBuild(type) { buildType = type; }
+export function setBuild(type) { buildType = type; buildMod = null; }
 export function getBuild() { return buildType; }
+export function setBuildMod(type) { buildMod = type; buildType = null; }
+export function getBuildMod() { return buildMod; }
 export function setSelected(key) { selectedKey = key; }
 
 function resize() {
@@ -78,9 +83,18 @@ function onClick() {
   const gx = mouse.gx, gy = mouse.gy;
   const fKey = furnitureAnchorAt(state.shared, gx, gy);
   const sKey = siteAnchorAt(state.shared, gx, gy);
+  if (buildMod) {
+    const f = fKey && state.shared.furniture[fKey];
+    if (!f) return onTileMessage("Put mods on a furniture surface.");
+    if (f.mods && f.mods[gx + "," + gy]) { const r = tryRemoveMod(gx, gy); if (r.ok) onTileMessage("Removed mod (+" + Math.round(r.refund) + ")."); return; }
+    const r = tryPlaceMod(buildMod, gx, gy);
+    if (!r.ok) onTileMessage(r.why || "Can't place that mod.");
+    else onTileMessage("Mod mounted.");
+    return;
+  }
   if (buildType) {
     if (!inBounds(gx, gy)) return onTileMessage("Outside the floor.");
-    const r = tryPlaceFurniture(buildType, gx, gy);
+    const r = tryPlaceFurniture(buildType, gx, gy, buildRot);
     if (!r.ok) onTileMessage(r.why || "Can't build there.");
     else onTileMessage("Build started — stand next to it to build it.");
     return;
@@ -232,10 +246,15 @@ function draw(t) {
   if (mouse.over && state.me.created) {
     if (buildType) {
       const blocked = blockedTiles(s);
-      for (const [cx, cy] of footprintCells(buildType, mouse.gx, mouse.gy)) {
+      for (const [cx, cy] of footprintCells(buildType, mouse.gx, mouse.gy, buildRot)) {
         const ok = inBounds(cx, cy) && !blocked.has(cx + "," + cy);
         drawTile(cx, cy, ok ? "rgba(70,190,120,0.55)" : "rgba(230,80,70,0.5)");
       }
+    } else if (buildMod) {
+      const fKey = furnitureAnchorAt(s, mouse.gx, mouse.gy);
+      const f = fKey && s.furniture[fKey];
+      const ok = f && hasSurface(f.type) && !(f.mods && f.mods[mouse.gx + "," + mouse.gy]);
+      if (inBounds(mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(150,90,220,0.6)" : "rgba(230,80,70,0.45)");
     } else if (inBounds(mouse.gx, mouse.gy)) {
       drawTile(mouse.gx, mouse.gy, "rgba(90,120,220,0.35)");
     }
@@ -245,12 +264,12 @@ function draw(t) {
 
   const items = [];
   for (const [key, f] of Object.entries(s.furniture)) {
-    const [ax, ay] = key.split(",").map(Number), [w, h] = footprintOf(f.type);
-    items.push({ depth: ax + ay + (w - 1) + (h - 1) - 0.1, kind: "furn", ax, ay, f, key });
+    const [ax, ay] = key.split(",").map(Number);
+    items.push({ depth: cellsDepth(footprintCells(f.type, ax, ay, f.rot || 0)), kind: "furn", ax, ay, f, key });
   }
   for (const [key, site] of Object.entries(s.sites || {})) {
-    const [ax, ay] = key.split(",").map(Number), [w, h] = footprintOf(site.type);
-    items.push({ depth: ax + ay + (w - 1) + (h - 1) - 0.1, kind: "site", ax, ay, site, key });
+    const [ax, ay] = key.split(",").map(Number);
+    items.push({ depth: cellsDepth(footprintCells(site.type, ax, ay, site.rot || 0)), kind: "site", ax, ay, site, key });
   }
   items.push({ depth: state.me.pos.x + state.me.pos.y, kind: "me" });
   for (const [, r] of renderPeers) items.push({ depth: r.x + r.y, kind: "peer", r });
@@ -272,15 +291,26 @@ function tileCorners(gx, gy) {
   return { p, T: { x: p.x, y: p.y - hh }, R: { x: p.x + hw, y: p.y }, B: { x: p.x, y: p.y + hh }, L: { x: p.x - hw, y: p.y } };
 }
 
-// Outline corners of a whole w×h footprint (generalizes tileCorners for 1×1).
-function footprintCorners(ax, ay, type) {
-  const [w, h] = footprintOf(type), bx = ax + w - 1, by = ay + h - 1;
-  const hw = (TILE_W / 2) * camera.zoom, hh = (TILE_H / 2) * camera.zoom;
-  const pT = project(ax, ay, canvas), pR = project(bx, ay, canvas), pB = project(bx, by, canvas), pL = project(ax, by, canvas);
-  return {
-    p: project((ax + bx) / 2, (ay + by) / 2, canvas),
-    T: { x: pT.x, y: pT.y - hh }, R: { x: pR.x + hw, y: pR.y }, B: { x: pB.x, y: pB.y + hh }, L: { x: pL.x - hw, y: pL.y },
-  };
+function cellsDepth(cells) { let m = -Infinity; for (const [x, y] of cells) m = Math.max(m, x + y); return m - 0.1; }
+function centroid(cells) { let sx = 0, sy = 0; for (const [x, y] of cells) { sx += x; sy += y; } return { x: sx / cells.length, y: sy / cells.length }; }
+
+// Draw a set of footprint cells as one extruded shape (any shape, incl. L).
+function quad(a, b, c, d) { ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.lineTo(b.x, b.y); ctx.lineTo(c.x, c.y); ctx.lineTo(d.x, d.y); ctx.closePath(); ctx.fill(); }
+function drawCellsPrism(cells, tint, z, { selected = false, using = false, alpha = 1 } = {}) {
+  const set = new Set(cells.map((c) => c[0] + "," + c[1]));
+  const sorted = cells.slice().sort((a, b) => (a[0] + a[1]) - (b[0] + b[1]));
+  ctx.globalAlpha = alpha;
+  for (const [cx, cy] of sorted) {
+    const c = tileCorners(cx, cy);
+    if (!set.has(cx + "," + (cy + 1))) { ctx.fillStyle = shade(tint, -30); quad(c.L, c.B, { x: c.B.x, y: c.B.y - z }, { x: c.L.x, y: c.L.y - z }); }
+    if (!set.has((cx + 1) + "," + cy)) { ctx.fillStyle = shade(tint, -16); quad(c.R, c.B, { x: c.B.x, y: c.B.y - z }, { x: c.R.x, y: c.R.y - z }); }
+    ctx.beginPath();
+    ctx.moveTo(c.T.x, c.T.y - z); ctx.lineTo(c.R.x, c.R.y - z); ctx.lineTo(c.B.x, c.B.y - z); ctx.lineTo(c.L.x, c.L.y - z); ctx.closePath();
+    ctx.fillStyle = selected ? shade(tint, 18) : tint; ctx.fill();
+    if (using) { ctx.strokeStyle = "rgba(70,200,130,0.9)"; ctx.lineWidth = 2 * camera.zoom; ctx.stroke(); }
+    else if (selected) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.stroke(); }
+  }
+  ctx.globalAlpha = 1;
 }
 
 function drawTile(gx, gy, fill) {
@@ -297,62 +327,42 @@ const TAG_TINT = { brain: "#4b56b8", build: "#c9772f", neutral: "#7f8794" };
 function drawFurniture(ax, ay, f, selected, using) {
   const def = FURNITURE[f.type];
   const tint = TAG_TINT[def.tag] || "#9aa3af";
-  const c = footprintCorners(ax, ay, f.type);
+  const cells = footprintCells(f.type, ax, ay, f.rot || 0);
   const z = def.h * camera.zoom * (1 + (f.level - 1) * 0.12);
+  drawCellsPrism(cells, tint, z, { selected, using });
 
-  if (using) {
-    ctx.save();
-    ctx.beginPath();
-    ctx.moveTo(c.T.x, c.T.y - z); ctx.lineTo(c.R.x, c.R.y - z); ctx.lineTo(c.B.x, c.B.y - z); ctx.lineTo(c.L.x, c.L.y - z);
-    ctx.closePath();
-    ctx.strokeStyle = "rgba(70,200,130,0.95)"; ctx.lineWidth = 3 * camera.zoom; ctx.stroke();
-    ctx.restore();
-  }
-
-  ctx.fillStyle = shade(tint, -30);
-  ctx.beginPath();
-  ctx.moveTo(c.L.x, c.L.y); ctx.lineTo(c.B.x, c.B.y); ctx.lineTo(c.B.x, c.B.y - z); ctx.lineTo(c.L.x, c.L.y - z);
-  ctx.closePath(); ctx.fill();
-  ctx.fillStyle = shade(tint, -16);
-  ctx.beginPath();
-  ctx.moveTo(c.R.x, c.R.y); ctx.lineTo(c.B.x, c.B.y); ctx.lineTo(c.B.x, c.B.y - z); ctx.lineTo(c.R.x, c.R.y - z);
-  ctx.closePath(); ctx.fill();
-
-  ctx.beginPath();
-  ctx.moveTo(c.T.x, c.T.y - z); ctx.lineTo(c.R.x, c.R.y - z); ctx.lineTo(c.B.x, c.B.y - z); ctx.lineTo(c.L.x, c.L.y - z);
-  ctx.closePath();
-  ctx.fillStyle = selected ? shade(tint, 18) : tint;
-  ctx.fill();
-  if (selected) { ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.stroke(); }
-
+  const cen = centroid(cells), p = project(cen.x, cen.y, canvas);
   ctx.font = `${15 * camera.zoom}px system-ui, sans-serif`;
   ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(def.glyph, c.p.x, c.p.y - z - 1 * camera.zoom);
+  ctx.fillText(def.glyph, p.x, p.y - z - 1 * camera.zoom);
   if (f.level > 1) {
     ctx.font = `${9 * camera.zoom}px system-ui, sans-serif`;
     ctx.fillStyle = "rgba(255,255,255,0.92)";
-    ctx.fillText("L" + f.level, c.p.x, c.p.y - z + 11 * camera.zoom);
+    ctx.fillText("L" + f.level, p.x, p.y - z + 11 * camera.zoom);
+  }
+  if (f.mods) {
+    ctx.font = `${12 * camera.zoom}px system-ui, sans-serif`;
+    for (const [mk, mtype] of Object.entries(f.mods)) {
+      const [mx, my] = mk.split(",").map(Number), mp = project(mx, my, canvas);
+      ctx.fillText((MODS[mtype] && MODS[mtype].glyph) || "?", mp.x, mp.y - z - 6 * camera.zoom);
+    }
   }
 }
 
 function drawSite(ax, ay, site) {
   const def = FURNITURE[site.type], tint = TAG_TINT[def.tag] || "#9aa3af";
-  const c = footprintCorners(ax, ay, site.type), z = def.h * 0.5 * camera.zoom;
+  const cells = footprintCells(site.type, ax, ay, site.rot || 0), z = def.h * 0.5 * camera.zoom;
   const prog = Math.min(1, siteProgress(site) / site.work);
-  const building = state.me.created && isNearFootprint(state.me.pos, site.type, ax, ay, TUNING.adjacencyRange);
-
-  ctx.globalAlpha = 0.5;
-  ctx.fillStyle = shade(tint, -16);
-  ctx.beginPath(); ctx.moveTo(c.T.x, c.T.y - z); ctx.lineTo(c.R.x, c.R.y - z); ctx.lineTo(c.B.x, c.B.y - z); ctx.lineTo(c.L.x, c.L.y - z); ctx.closePath(); ctx.fill();
-  ctx.globalAlpha = 1;
+  const building = state.me.created && isNearFootprint(state.me.pos, site.type, ax, ay, TUNING.adjacencyRange, site.rot || 0);
+  drawCellsPrism(cells, tint, z, { alpha: 0.5 });
   ctx.strokeStyle = building ? "rgba(70,200,130,0.95)" : "rgba(90,100,120,0.7)";
   ctx.setLineDash([4, 3]); ctx.lineWidth = 2 * camera.zoom;
-  ctx.beginPath(); ctx.moveTo(c.T.x, c.T.y - z); ctx.lineTo(c.R.x, c.R.y - z); ctx.lineTo(c.B.x, c.B.y - z); ctx.lineTo(c.L.x, c.L.y - z); ctx.closePath(); ctx.stroke(); ctx.setLineDash([]);
-
+  for (const [cx, cy] of cells) { const c = tileCorners(cx, cy); ctx.beginPath(); ctx.moveTo(c.T.x, c.T.y - z); ctx.lineTo(c.R.x, c.R.y - z); ctx.lineTo(c.B.x, c.B.y - z); ctx.lineTo(c.L.x, c.L.y - z); ctx.closePath(); ctx.stroke(); }
+  ctx.setLineDash([]);
+  const cen = centroid(cells), p = project(cen.x, cen.y, canvas);
   ctx.font = `${13 * camera.zoom}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.globalAlpha = 0.7; ctx.fillText("🔨", c.p.x, c.p.y - z - 2 * camera.zoom); ctx.globalAlpha = 1;
-
-  const bw = 30 * camera.zoom, bh = 5 * camera.zoom, bx = c.p.x - bw / 2, by = c.p.y - z - 16 * camera.zoom;
+  ctx.globalAlpha = 0.7; ctx.fillText("🔨", p.x, p.y - z - 2 * camera.zoom); ctx.globalAlpha = 1;
+  const bw = 30 * camera.zoom, bh = 5 * camera.zoom, bx = p.x - bw / 2, by = p.y - z - 16 * camera.zoom;
   ctx.fillStyle = "rgba(20,22,28,0.55)"; ctx.fillRect(bx, by, bw, bh);
   ctx.fillStyle = "#46c882"; ctx.fillRect(bx, by, bw * prog, bh);
 }

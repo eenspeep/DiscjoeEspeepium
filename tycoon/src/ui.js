@@ -17,9 +17,10 @@ import {
   furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
   currentTier, nextTier, researchTotal, siteProgress, tierPower, TIER_COUNT,
   esoOfItem, esoOfFurniture, currentEso, nextEso, ESO_MAX, ESO_NAME,
+  MODS, MOD_ORDER, modPrice, isModUnlocked,
 } from "./economy.js";
 import { BASE_LOOK, drawJoey, defaultLook } from "./appearance.js";
-import { setBuild, getBuild, setSelected } from "./world.js";
+import { setBuild, getBuild, setBuildMod, getBuildMod, setSelected } from "./world.js";
 
 let hud, buildbar, panel, toast;
 let openKey = null, openView = null;
@@ -108,8 +109,8 @@ const TAG_CLASS = { brain: "t-brain", build: "t-build", neutral: "t-neutral" };
 function renderBuildbar() {
   if (!buildbar) return;
   if (!state.me.created) { buildbar.replaceChildren(); return; }
-  const s = state.shared, active = getBuild(), me = state.me;
-  const cursor = el("button", { class: "build-btn cursor" + (active ? "" : " active"), title: "Walk mode", onclick: () => selectBuild(null) }, [el("span", { class: "b-glyph", text: "👆" }), el("span", { class: "b-name", text: "Walk" })]);
+  const s = state.shared, active = getBuild(), activeMod = getBuildMod(), me = state.me;
+  const cursor = el("button", { class: "build-btn cursor" + (active || activeMod ? "" : " active"), title: "Walk mode", onclick: () => selectBuild(null) }, [el("span", { class: "b-glyph", text: "👆" }), el("span", { class: "b-name", text: "Walk" })]);
   const btns = FURNITURE_ORDER.filter((type) => furnitureTier(type) <= currentTier(s)).map((type) => {
     const def = FURNITURE[type];
     const esoReq = esoOfFurniture(type);
@@ -128,9 +129,18 @@ function renderBuildbar() {
   const nt = nextTier(s);
   const teaser = nt ? el("button", { class: "build-btn locked", title: "Research " + (nt.need - nt.have) + " more to unlock Tier " + nt.tier, onclick: () => flash("Next: Tier " + nt.tier + " " + nt.name + " — " + nt.have + "/" + nt.need + " research. Stand at BRAIN furniture.") },
     [el("span", { class: "b-glyph", text: "🔒" }), el("span", { class: "b-name", text: "Tier " + nt.tier }), el("span", { class: "b-cost", text: "🔬" })]) : null;
-  buildbar.replaceChildren(cursor, ...btns, expand, ...(teaser ? [teaser] : []));
+  const KIND_GLYPH = { income: "¢", research: "🔬", build: "🔧" };
+  const modBtns = MOD_ORDER.filter((type) => isModUnlocked(type, s)).map((type) => {
+    const m = MODS[type], price = modPrice(type), afford = me.credits >= price;
+    return el("button", { class: "build-btn mod" + (activeMod === type ? " active" : "") + (afford ? "" : " poor"), title: m.name + " — node mod, +" + fmt(m.unit * tierPower(m.tier)) + " flat " + m.kind + " (mount on a surface)", onclick: () => selectMod(type) },
+      [el("span", { class: "b-glyph", text: m.glyph }), el("span", { class: "b-name", text: m.name }), el("span", { class: "b-cost", text: fmt(price) })]);
+  });
+  const modSep = modBtns.length ? [el("span", { class: "build-sep", text: "Mods" })] : [];
+
+  buildbar.replaceChildren(cursor, ...btns, ...modSep, ...modBtns, expand, ...(teaser ? [teaser] : []));
 }
-function selectBuild(type) { setBuild(getBuild() === type ? null : type); if (getBuild()) flash("Click a tile to place your " + FURNITURE[getBuild()].name + "."); renderBuildbar(); }
+function selectBuild(type) { setBuild(getBuild() === type ? null : type); if (getBuild()) flash("Click a floor tile to place your " + FURNITURE[getBuild()].name + " · R to rotate."); renderBuildbar(); }
+function selectMod(type) { setBuildMod(getBuildMod() === type ? null : type); if (getBuildMod()) flash("Click a surface tile of a desk/table to mount the " + MODS[getBuildMod()].name + "."); renderBuildbar(); }
 
 // ---- furniture inspector --------------------------------------------------
 
