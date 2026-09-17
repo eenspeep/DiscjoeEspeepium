@@ -873,6 +873,18 @@ export function tryTeleport(gx, gy) {
   return { ok: true };
 }
 export function isInvulnerable() { return now() < (state.invulnUntil || 0); }
+
+// Admin/debug boost (gated in the UI to one account): 1s of invincibility +
+// noclip and a 1000-gold top-up.
+export function cheatBoost() {
+  const me = state.me; if (!me || !me.created) return { ok: false };
+  const t = now();
+  state.invulnUntil = Math.max(state.invulnUntil || 0, t + 1000);
+  state.noclipUntil = t + 1000;
+  me.credits = round2((me.credits || 0) + 1000);
+  state.meDirty = true; saveMe(); notify();
+  return { ok: true };
+}
 export function jumpCdLeft() { return Math.max(0, Math.ceil(((state.jumpCdUntil || 0) - now()) / 1000)); }
 
 // ---- Garlic Charlie -------------------------------------------------------

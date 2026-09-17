@@ -4,6 +4,13 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Admin debug "Boost" button — SHIPPED
+A HUD button gated to the account username `ianabercrombie` (case-insensitive,
+substring). `cheatBoost()` grants 1s of invincibility (reuses `invulnUntil`) +
+1s noclip (`noclipUntil`, makes `solid()` pass everything in the collision
+check) and +1000¢. Personal-only, so no shared exploit. Hidden for everyone
+else. Verified the boost grants gold + invuln + noclip.
+
 ## 2026-09-17 — Tired rats can wake when hit (50%) — SHIPPED
 Hitting a worn-down (tired/docile) rat now has a 50% chance to startle it awake
 — it drops back into hunting mode (attacks reset) instead of taking the blow,
