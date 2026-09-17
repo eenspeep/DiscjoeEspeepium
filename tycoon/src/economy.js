@@ -592,7 +592,7 @@ export const ITEMS = {
   // Tier 7
   caffeineiv: { name: "Caffeine IV", slot: "torso", tier: 7, mult: 0.15, shape: "square", glyph: "💉", color: "#8a5a2b", costUnit: 1.8 },
   exoskeleton: { name: "Exoskeleton", slot: "torso", tier: 7, buildBonus: 3, shape: "square", glyph: "🦿", color: "#7f8794", costUnit: 2.0 },
-  neurallace: { name: "Neural Lace", slot: "head", tier: 7, researchBonus: 3, shape: "domino", glyph: "🕸️", color: "#4b56b8", costUnit: 2.0 },
+  neurallace: { name: "Neural Lace", slot: "head", tier: 7, researchBonus: 3, shape: "domino", art: "neurallace", glyph: "🕸️", color: "#4b56b8", costUnit: 2.0 },
   bag_wide: { name: "Wide Loadout", slot: "bag", tier: 7, grid: { w: 5, h: 4 }, shape: "square", art: "bag", glyph: "🎒", color: "#3b5b6b", costUnit: 2.2 },
   // Tier 8
   timewatch: { name: "Time-Dilation Watch", slot: "hands", tier: 8, speedMult: 0.3, shape: "dot", glyph: "⌚", color: "#d8b24a", costUnit: 2.2 },
@@ -602,15 +602,15 @@ export const ITEMS = {
   // Tier 9 — esoteric
   mustachewax: { name: "Quantum 'Stache Wax", slot: "nose", tier: 9, mult: 0.18, shape: "dot", glyph: "💈", color: "#a4471f", costUnit: 2.5 },
   antigravboots: { name: "Anti-Gravity Boots", slot: "feet", tier: 9, speedMult: 0.5, shape: "domino", glyph: "🚀", color: "#4b56b8", costUnit: 2.6 },
-  hivemind: { name: "Hivemind Headset", slot: "head", tier: 9, researchBonus: 6, shape: "triL", glyph: "📡", color: "#3c7a4a", costUnit: 2.8 },
+  hivemind: { name: "Hivemind Headset", slot: "head", tier: 9, researchBonus: 6, shape: "triL", art: "hivemind", glyph: "📡", color: "#3c7a4a", costUnit: 2.8 },
   // Tier 10 — post-work reality
-  crown: { name: "Crown of Middle Management", slot: "head", tier: 10, mult: 0.5, shape: "domino", glyph: "👑", color: "#f2b134", costUnit: 3.0 },
+  crown: { name: "Crown of Middle Management", slot: "head", tier: 10, mult: 0.5, shape: "domino", art: "crown", glyph: "👑", color: "#f2b134", costUnit: 3.0 },
   ringbinder: { name: "The One Ring Binder", slot: "hands", tier: 10, mult: 0.4, shape: "domino", glyph: "📕", color: "#b8455a", costUnit: 3.2 },
   sentienttie: { name: "Sentient Necktie", slot: "torso", tier: 10, mult: 0.6, shape: "square", glyph: "👔", color: "#4b3b6b", costUnit: 3.4 },
   infinitybag: { name: "Infinity Briefcase", slot: "bag", tier: 10, grid: { w: 6, h: 6 }, mult: 0.1, shape: "square", art: "bag", glyph: "💼", color: "#1c1c22", costUnit: 3.6 },
   // SOUL gear — boosts how fast you channel soul at altars. The first is Eso 0
   // so you can bootstrap soul before the esoteric column opens.
-  candlehat: { name: "Candle Hat", slot: "head", tier: 3, soulBonus: 0.4, shape: "triL", glyph: "🕯️", color: "#c98a2b", costUnit: 1.2 },
+  candlehat: { name: "Candle Hat", slot: "head", tier: 3, soulBonus: 0.4, shape: "triL", art: "candlehat", glyph: "🕯️", color: "#c98a2b", costUnit: 1.2 },
   ouija: { name: "Ouija Pendant", slot: "nose", tier: 4, soulBonus: 0.6, shape: "dot", glyph: "🔯", color: "#5a3fb8", costUnit: 1.4 },
   ritualrobes: { name: "Ritual Robes", slot: "torso", tier: 6, soulBonus: 1.2, shape: "square", glyph: "👘", color: "#3b2b5b", costUnit: 1.8 },
   // ---- COMBAT: weapons (hand) — attacking needs one; it breaks after `uses` ---
@@ -767,14 +767,14 @@ export function wornArt(me) {
   for (const slot of ["head", "eyes", "nose", "torso", "hands", "legs", "feet", "weapon"]) {
     const uid = me.equipment && me.equipment[slot];
     const inst = uid && me.items && me.items[uid];
-    if (inst && ITEMS[inst.type]) out[slot] = { art: ITEMS[inst.type].art, color: ITEMS[inst.type].color };
+    if (inst && ITEMS[inst.type]) out[slot] = { art: ITEMS[inst.type].art, color: ITEMS[inst.type].color, glyph: ITEMS[inst.type].glyph, slot };
   }
   return out;
 }
 // Resolve a slot->itemType map (e.g. Charlie's gear) to worn art for drawing.
 export function gearWorn(gear) {
   const out = {};
-  for (const [slot, type] of Object.entries(gear || {})) if (ITEMS[type]) out[slot] = { art: ITEMS[type].art, color: ITEMS[type].color };
+  for (const [slot, type] of Object.entries(gear || {})) if (ITEMS[type]) out[slot] = { art: ITEMS[type].art, color: ITEMS[type].color, glyph: ITEMS[type].glyph, slot };
   return out;
 }
 // Income is MULTIPLICATIVE now: your raw gold (base + gear value + income node
