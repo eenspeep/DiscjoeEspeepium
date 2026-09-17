@@ -278,11 +278,10 @@ function buildTick(dt) {
   for (const [key, site] of Object.entries(s.sites || {})) {
     const [gx, gy] = key.split(",").map(Number);
     if (!isNearFootprint(me.pos, site.type, gx, gy, bReach)) continue;
-    site.progBy = site.progBy || {};
-    site.progBy[me.id] = round2((site.progBy[me.id] || 0) + power * dt);
-    state.dirty = true;
-    if (siteProgress(site) >= site.work) {
-      if (!s.furniture[key]) s.furniture[key] = { type: site.type, level: 1, by: Object.keys(site.progBy), rot: site.rot || 0, paidBy: site.paidBy || null };
+    sharedOp({ t: "progBy", key, pid: me.id, work: round2(power * dt) });   // my build contribution
+    // only the host turns a finished site into furniture (single authority)
+    if (state.isHost && siteProgress(site) >= site.work) {
+      if (!s.furniture[key]) s.furniture[key] = { type: site.type, level: 1, by: Object.keys(site.progBy || {}), rot: site.rot || 0, paidBy: site.paidBy || null };
       delete s.sites[key];
       state.justBuilt = FURNITURE[site.type] ? FURNITURE[site.type].name : site.type;
       flushShared(true);
@@ -290,11 +289,7 @@ function buildTick(dt) {
   }
 
   const rp = rpRate(me, s) * dt * (1 + 0.2 * traitVal(me, "researchWeight"));   // "Research weight" trait
-  if (rp > 0) {
-    s.research.contrib = s.research.contrib || {};
-    s.research.contrib[me.id] = round2((s.research.contrib[me.id] || 0) + rp);
-    state.dirty = true;
-  }
+  if (rp > 0) sharedOp({ t: "contrib", pid: me.id, rp: round2(rp) });
 
   const q = me.buildQueue;
   if (q && q.length) {
@@ -335,22 +330,70 @@ function resolvePot(t) {
   state.dirty = true; flushShared(true); notify();
 }
 
+// Only the host writes/broadcasts the shared office. Non-hosts relay their
+// changes as ops (below), so concurrent edits no longer clobber each other.
 export function flushShared(force = false) {
-  if (state.net && (state.dirty || force)) { state.net.pushShared(state.shared); state.dirty = false; }
+  if (state.net && state.isHost && (state.dirty || force)) { state.net.pushShared(state.shared); state.dirty = false; }
+}
+function netSend(msg) { if (state.net && state.net.send) state.net.send(msg); }
+
+// ---- host-authoritative shared ops ----------------------------------------
+// A shared mutation is expressed as a small data "op". applyOp reduces it onto
+// a shared object (identical on host and single-player). sharedOp applies it
+// locally (optimistic) and, if I'm not the host, relays it to the host; the
+// host applies relayed ops onto the authoritative state and rebroadcasts.
+export function applyOp(s, op) {
+  switch (op.t) {
+    case "site+": s.sites[op.key] = op.val; break;
+    case "site-": delete s.sites[op.key]; break;
+    case "furn+": s.furniture[op.key] = op.val; break;
+    case "furn-": delete s.furniture[op.key]; break;
+    case "furnLvl": if (s.furniture[op.key]) s.furniture[op.key].level = op.level; break;
+    case "furnBroken": if (s.furniture[op.key]) s.furniture[op.key].broken = op.val; break;
+    case "mod+": { const f = s.furniture[op.key]; if (f) { f.mods = f.mods || {}; f.mods[op.mk] = op.mod; } break; }
+    case "mod-": { const f = s.furniture[op.key]; if (f && f.mods) delete f.mods[op.mk]; break; }
+    case "wall+": s.walls = s.walls || {}; s.walls[op.key] = op.val; break;
+    case "wall-": if (s.walls) delete s.walls[op.key]; break;
+    case "door+": s.doors[op.key] = op.val; break;
+    case "door-": delete s.doors[op.key]; break;
+    case "doorLock": { const d = s.doors[op.key]; if (d) { d.locked = op.locked; if ("hash" in op) d.hash = op.hash; } break; }
+    case "rooms": s.rooms = op.rooms; s.halls = op.halls; s.floor = op.floor; break;
+    case "owed+": s.owed = s.owed || {}; s.owed[op.pid] = round2((s.owed[op.pid] || 0) + op.amt); break;
+    case "owed-": if (s.owed) delete s.owed[op.pid]; break;
+    case "contrib": { s.research = s.research || { contrib: {} }; s.research.contrib = s.research.contrib || {}; s.research.contrib[op.pid] = round2((s.research.contrib[op.pid] || 0) + op.rp); break; }
+    case "progBy": { const st = s.sites[op.key]; if (st) { st.progBy = st.progBy || {}; st.progBy[op.pid] = round2((st.progBy[op.pid] || 0) + op.work); } break; }
+    case "loot+": addLootTo(s, op.key, op.types); break;
+    case "monster-": if (s.monsters) delete s.monsters[op.id]; break;
+    case "monsterGuard": { const m = s.monsters && s.monsters[op.id]; if (m) { m.guard = op.guard; if (op.armorKey) { addLootTo(s, op.armorKey, [op.armorType]); m.armor = null; } } break; }
+    case "potInvest": { const p = s.pot; if (p) { p.balance = round2(p.balance + op.amt); p.contributions[op.pid] = round2((p.contributions[op.pid] || 0) + op.amt); } break; }
+    case "potVote": { if (s.pot) s.pot.votes[op.pid] = op.proposal; break; }
+    case "spawnRat": break;   // resolved on the host only (hostApplyOp)
+  }
+}
+function sharedOp(op, local = true) {
+  if (local) applyOp(state.shared, op);
+  if (state.isHost) state.dirty = true; else netSend({ type: "__op", op, from: state.me.id });
+}
+// Host side: apply a relayed op onto the authoritative state, then rebroadcast.
+export function hostApplyOp(op) {
+  if (!state.isHost || !op) return;
+  if (op.t === "spawnRat") spawnRat(op.x, op.y);
+  else applyOp(state.shared, op);
+  state.dirty = true; flushShared(true); notify();
 }
 
 // ---- economy actions ------------------------------------------------------
 
 export function income$() { return income(state.me, state.shared); }
 function spend(amt) { state.me.credits = round2(state.me.credits - amt); state.meDirty = true; }
-function commit() { state.dirty = true; flushShared(true); saveMe(); notify(); }
+// A local action finished: persist my personal state + refresh UI. The shared
+// office is synced via sharedOp/flushShared, not here.
+function commit() { saveMe(); notify(); if (state.isHost) flushShared(true); }
 
 // Refunds owed to another player are parked in a shared ledger and claimed by
 // that player's own client (survives them being offline when you sell).
 function creditOwed(playerId, amount) {
-  const s = state.shared; s.owed = s.owed || {};
-  s.owed[playerId] = round2((s.owed[playerId] || 0) + amount);
-  state.dirty = true;
+  sharedOp({ t: "owed+", pid: playerId, amt: amount });
 }
 function claimOwed() {
   const s = state.shared, me = state.me;
@@ -358,9 +401,10 @@ function claimOwed() {
   const amt = s.owed[me.id];
   if (amt && amt > 0) {
     me.credits = round2(me.credits + amt);
-    delete s.owed[me.id];
+    sharedOp({ t: "owed-", pid: me.id });
     state.meDirty = true; state.justRefund = amt;
-    flushShared(true); notify();
+    if (state.isHost) flushShared(true);
+    notify();
   }
 }
 // Route a furniture/site refund to whoever paid: my wallet if it's mine, the
@@ -385,7 +429,7 @@ export function tryPlaceFurniture(type, gx, gy, rot = 0) {
   const cost = Math.ceil(furnitureBuyCost(s, type) * (1 - discountFrac(state.me)));   // "Shop discount" trait
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
   spend(cost);
-  s.sites[key] = { type, rot, work: furnitureWork(type), progBy: {}, started: now(), paidBy: state.me.id, paid: cost };
+  sharedOp({ t: "site+", key, val: { type, rot, work: furnitureWork(type), progBy: {}, started: now(), paidBy: state.me.id, paid: cost } });
   commit();
   return { ok: true, building: true };
 }
@@ -402,7 +446,7 @@ export function tryPlaceWall(type, gx, gy, side) {
   const cost = Math.ceil(wallPrice(type) * (1 - discountFrac(state.me)));
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
   spend(cost);
-  s.walls[key] = { type, paidBy: state.me.id, paid: cost };
+  sharedOp({ t: "wall+", key, val: { type, paidBy: state.me.id, paid: cost } });
   commit();
   return { ok: true };
 }
@@ -412,7 +456,7 @@ export function trySellWall(key) {
   if (!prot && w.paidBy && w.paidBy !== state.me.id) return { ok: false, why: "Only the buyer can take this down." };
   const mine = !w.paidBy || w.paidBy === state.me.id;
   const refund = Math.ceil(wallPrice(w.type) * (mine ? refundFrac(state.me) : 0.4));
-  delete s.walls[key];
+  sharedOp({ t: "wall-", key });
   const toOther = payRefund(w.paidBy, refund);
   commit();
   return { ok: true, refund, toOther };
@@ -430,7 +474,7 @@ export function tryPlaceMod(modType, gx, gy) {
   if (f.mods[mk]) return { ok: false, why: "There's already a mod there." };
   const price = modPrice(modType);
   if (state.me.credits < price) return { ok: false, why: "Not enough credits." };
-  spend(price); f.mods[mk] = modType; commit();
+  spend(price); sharedOp({ t: "mod+", key: fKey, mk, mod: modType }); commit();
   return { ok: true };
 }
 export function tryRemoveMod(gx, gy) {
@@ -439,7 +483,7 @@ export function tryRemoveMod(gx, gy) {
   const f = s.furniture[fKey], mk = gx + "," + gy;
   if (!f.mods || !f.mods[mk]) return { ok: false };
   const refund = Math.ceil(modPrice(f.mods[mk]) * refundFrac(state.me));
-  delete f.mods[mk]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
+  sharedOp({ t: "mod-", key: fKey, mk }); state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
   return { ok: true, refund };
 }
 
@@ -449,7 +493,7 @@ export function cancelSite(key) {
   if (!prot && site.paidBy && site.paidBy !== state.me.id) return { ok: false, why: "Only the buyer can cancel this build." };
   const payer = site.paidBy, mine = !payer || payer === state.me.id;
   const refund = Math.ceil(furnitureBuyCost(s, site.type) * (mine ? refundFrac(state.me) : 0.4));
-  delete s.sites[key];
+  sharedOp({ t: "site-", key });
   const toOther = payRefund(payer, refund);
   commit();
   return { ok: true, refund, toOther };
@@ -458,7 +502,7 @@ export function tryUpgradeFurniture(key) {
   const f = state.shared.furniture[key]; if (!f) return { ok: false };
   const cost = upgradeCost(f);
   if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
-  spend(cost); f.level += 1; commit(); return { ok: true };
+  spend(cost); sharedOp({ t: "furnLvl", key, level: (f.level || 1) + 1 }); commit(); return { ok: true };
 }
 export function trySellFurniture(key) {
   const s = state.shared, f = s.furniture[key]; if (!f) return { ok: false };
@@ -467,7 +511,7 @@ export function trySellFurniture(key) {
   if (!prot && Array.isArray(f.by) && f.by.length && !f.by.includes(state.me.id)) return { ok: false, why: "Only its builders can sell it." };
   const payer = f.paidBy, mine = !payer || payer === state.me.id;
   const refund = Math.ceil(furnitureBuyCost(s, f.type) * (mine ? refundFrac(state.me) : 0.4));
-  delete s.furniture[key];
+  sharedOp({ t: "furn-", key });
   const toOther = payRefund(payer, refund);
   commit();
   return { ok: true, refund, toOther };
@@ -480,7 +524,8 @@ export function tryAddRoom() {
   const { room, hall } = nextRoom(s);
   room.protected = true;   // rooms added onto the office are protected too
   spend(cost);
-  s.rooms.push(room); s.halls.push(hall); s.floor = floorBounds(s);
+  const rooms = s.rooms.concat([room]), halls = s.halls.concat([hall]);
+  sharedOp({ t: "rooms", rooms, halls, floor: floorBounds({ rooms, halls }) });
   commit();
   return { ok: true, room };
 }
@@ -496,7 +541,7 @@ export function tryPlaceDoor(gx, gy) {
   if (s.furniture[key] || s.sites[key]) return { ok: false, why: "That tile is occupied." };
   if (state.me.credits < TUNING.doorCost) return { ok: false, why: "Not enough credits." };
   spend(TUNING.doorCost);
-  s.doors[key] = { by: state.me.id, locked: false, hash: null };
+  sharedOp({ t: "door+", key, val: { by: state.me.id, locked: false, hash: null } });
   commit();
   return { ok: true };
 }
@@ -506,14 +551,14 @@ export function tryLockDoor(key, password) {
   if (!password) return { ok: false, why: "Type a password first." };
   if (state.me.credits < TUNING.lockCost) return { ok: false, why: "A lock costs " + TUNING.lockCost + "." };
   spend(TUNING.lockCost);
-  d.locked = true; d.hash = hash(String(password));
+  sharedOp({ t: "doorLock", key, locked: true, hash: hash(String(password)) });
   commit();
   return { ok: true };
 }
 export function tryUnlockDoor(key) {
   const d = state.shared.doors[key]; if (!d) return { ok: false };
   if (d.by !== state.me.id) return { ok: false, why: "Only the owner can unlock it." };
-  d.locked = false; commit();
+  sharedOp({ t: "doorLock", key, locked: false }); commit();
   return { ok: true };
 }
 export function checkDoorPassword(key, password) {
@@ -524,17 +569,21 @@ export function tryRemoveDoor(key) {
   const s = state.shared, d = s.doors[key]; if (!d) return { ok: false };
   if (d.by !== state.me.id) return { ok: false, why: "Only the owner can remove it." };
   const refund = Math.ceil(TUNING.doorCost * refundFrac(state.me) + (d.locked ? TUNING.lockCost * 0.3 : 0));
-  delete s.doors[key]; state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
+  sharedOp({ t: "door-", key }); state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
   return { ok: true, refund };
 }
 
 // ---- combat ---------------------------------------------------------------
 
+function addLootTo(s, key, types) {
+  if (!types || !types.length) return;
+  s.loot = s.loot || {};
+  const pile = s.loot[key] || { items: [] };
+  pile.items.push(...types); s.loot[key] = pile;
+}
 function addLoot(key, types) {
   if (!types || !types.length) return;
-  const s = state.shared; s.loot = s.loot || {};
-  const pile = s.loot[key] || { items: [] };
-  pile.items.push(...types); s.loot[key] = pile; state.dirty = true;
+  sharedOp({ t: "loot+", key, types });
 }
 
 // Swing the equipped weapon: it loses one use and breaks at zero (a knife has
@@ -791,7 +840,8 @@ function formRatKing() {
 export function tryBuyRatEgg() {
   if (state.me.credits < TUNING.ratEggCost) return { ok: false, why: "Not enough credits." };
   spend(TUNING.ratEggCost);
-  const p = state.me.pos; spawnRat(p.x + (Math.random() * 2 - 1), p.y + (Math.random() * 2 - 1));
+  const p = state.me.pos, rx = p.x + (Math.random() * 2 - 1), ry = p.y + (Math.random() * 2 - 1);
+  if (state.isHost) spawnRat(rx, ry); else netSend({ type: "__op", op: { t: "spawnRat", x: rx, y: ry }, from: state.me.id });
   commit();
   return { ok: true };
 }
@@ -799,7 +849,7 @@ export function tryRepairFurniture(key) {
   const s = state.shared, f = s.furniture[key]; if (!f || !f.broken) return { ok: false, why: "Nothing to repair." };
   const cost = repairCost(f);
   if (state.me.credits < cost) return { ok: false, why: "Repair costs " + cost + "." };
-  spend(cost); f.broken = false; commit();
+  spend(cost); sharedOp({ t: "furnBroken", key, val: false }); commit();
   return { ok: true, cost };
 }
 
@@ -809,15 +859,15 @@ export function hitMonster(id) {
   const s = state.shared, m = s.monsters && s.monsters[id]; if (!m) return { ok: false };
   const key = Math.round(m.x) + "," + Math.round(m.y);
   if (m.guard > 0) {
-    m.guard -= 1;
-    if (m.kind === "rat" && m.armor) { addLoot(key, [m.armor]); m.armor = null; }
+    const newGuard = m.guard - 1, dropsArmor = m.kind === "rat" && m.armor;
+    sharedOp({ t: "monsterGuard", id, guard: newGuard, armorKey: dropsArmor ? key : undefined, armorType: dropsArmor ? m.armor : undefined });
     commit();
-    return { ok: true, blocked: true, king: m.kind === "king", guard: m.guard };
+    return { ok: true, blocked: true, king: m.kind === "king", guard: newGuard };
   }
   const coins = m.kind === "king" ? randInt(TUNING.kingCoinMin, TUNING.kingCoinMax) : randInt(TUNING.ratCoinMin, TUNING.ratCoinMax);
   state.me.credits = round2(state.me.credits + coins); state.meDirty = true;
   if (m.armor) addLoot(key, [m.armor]);
-  delete s.monsters[id];
+  sharedOp({ t: "monster-", id });
   commit();
   return { ok: true, killed: true, coins, king: m.kind === "king" };
 }
@@ -833,7 +883,7 @@ export function recruitRat(id) {
   if (!m || m.kind !== "rat" || !m.tired) return { ok: false, why: "That rat can't be recruited." };
   if (!withinReach(me, Math.round(m.x), Math.round(m.y))) return { ok: false, why: "Get closer to the rat." };
   me.pet = { since: Date.now() };
-  delete s.monsters[id];
+  sharedOp({ t: "monster-", id });
   state.meDirty = true;
   commit(); saveMe();
   state.justPetGot = true;
@@ -1015,15 +1065,14 @@ export function investPot(amount) {
   if (amount <= 0) return { ok: false, why: "Invest a positive amount." };
   if (state.me.credits < amount) return { ok: false, why: "Not enough credits." };
   state.me.credits = round2(state.me.credits - amount); state.meDirty = true;
-  pot.balance = round2(pot.balance + amount);
-  pot.contributions[state.me.id] = round2((pot.contributions[state.me.id] || 0) + amount);
+  sharedOp({ t: "potInvest", pid: state.me.id, amt: amount });
   commit(); return { ok: true };
 }
 export function votePot(proposalId) {
   const pot = state.shared.pot;
   if (pot.phase !== "voting") return { ok: false, why: "Voting isn't open yet." };
   if (!(pot.contributions[state.me.id] > 0)) return { ok: false, why: "Only contributors vote. Invest next week!" };
-  pot.votes[state.me.id] = proposalId; commit(); return { ok: true };
+  sharedOp({ t: "potVote", pid: state.me.id, proposal: proposalId }); commit(); return { ok: true };
 }
 
 // Click the Enzo statue for a coin. Personal wallet only, no shared write.
