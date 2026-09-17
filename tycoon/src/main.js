@@ -4,7 +4,7 @@
 import { ECON_TICK_MS, TUNING } from "./config.js";
 import { uid } from "./util.js";
 import { connectNet } from "./net/net.js";
-import { state, initState, tickEconomy, flushShared, saveMe, setAccount, adoptProfile, setProfileSaver, receiveAttack, applyKillReward, setMonsterSender, receiveMonsterHit } from "./state.js";
+import { state, initState, tickEconomy, flushShared, saveMe, setAccount, adoptProfile, setProfileSaver, receiveAttack, applyKillReward, setMonsterSender, receiveMonsterHit, hostApplyOp } from "./state.js";
 import { hasSupabase, currentUser, signIn, signUp, signOut, loadProfile, saveProfile, onProfileError } from "./account.js";
 import { initWorld, myPresence, applyPush } from "./world.js";
 import { initUI, openFurniture, openSite, openDoor, openWall, flash, showOffline } from "./ui.js";
@@ -41,7 +41,9 @@ async function boot() {
 
   setMonsterSender((msg) => net.send && net.send(msg));
   if (net.onMessage) net.onMessage((m) => {
-    if (!m || m.to !== myId) return;
+    if (!m) return;
+    if (m.type === "__op") { hostApplyOp(m.op); return; }   // a peer's shared-office change; host applies + rebroadcasts
+    if (m.to !== myId) return;
     if (m.type === "push") applyPush(m.x, m.y);
     else if (m.type === "monsterHit") receiveMonsterHit(m.king);
     else if (m.type === "attack") {

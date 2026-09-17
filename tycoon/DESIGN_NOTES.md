@@ -4,6 +4,26 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Host-authoritative netcode (fixes clobbering) — SHIPPED
+Root cause of "really fucky": every client wrote the shared office and
+broadcast the whole state, so concurrent edits (and per-tick build/research
+writes from everyone) clobbered each other constantly.
+
+Now the shared office has **one writer, the host**. Personal state (credits,
+inventory, look, kills, pet) stays local. Shared mutations are expressed as
+small data **ops** (`applyOp` reduces `{t, ...}` onto a shared object): `site±`,
+`furn±/Lvl/Broken`, `mod±`, `wall±`, `door±/Lock`, `rooms`, `owed±`, `contrib`,
+`progBy`, `loot+`, `monster-/Guard`, `spawnRat`, `pot*`. `sharedOp` applies the
+op locally (optimistic) and, if I'm not the host, relays it as `__op` to the
+host; the host applies relayed ops onto the authoritative state and rebroadcasts
+(`hostApplyOp`, wired through `main.js` onMessage). `flushShared` is now
+host-only. Build-site completion and all sims (monsters, Charlie, pot) run on the
+host only; non-hosts just send their contributions/actions and render the host's
+broadcast. Every shared mutation function was converted to emit ops instead of
+writing `state.shared` directly. On the host and in single-player the behavior is
+identical (an op just applies locally), which the parity + regression tests
+confirm.
+
 ## 2026-09-17 — Fluid shoving (walk into people) — SHIPPED
 Removed the E/`doPush` shove action and its help text. Now walking toward
 someone in the next tile over shoves them: `updateMe` checks the tile one step
