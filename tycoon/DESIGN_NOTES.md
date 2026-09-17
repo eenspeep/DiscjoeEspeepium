@@ -4,6 +4,26 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Doors anywhere, knife-kill fix, unstick key — SHIPPED
+Three requested fixes.
+
+- **Doors work without hallways.** Expansion is free-form tiles now, so hallways
+  barely exist. `tryPlaceDoor` dropped the `inHall` gate and now allows any
+  walkable floor tile (still blocks void, occupied tiles, and duplicates). The
+  build highlight and shop/hint copy updated to match ("any floor tile").
+
+- **Knives now kill players.** The attack round-trip is routed by connection id
+  (net.myId), but the outgoing attack stamped `from: me.id` (the profile id). The
+  victim replied `attackResult to: from`, which the attacker's inbound filter
+  (keyed on connection id) never matched, so the kill confirmation and bounty
+  never arrived — the strike looked like it did nothing. Now it stamps
+  `from: state.netId`. Also, `receiveAttack` returns the victim's name (captured
+  before `killMe` blanks `state.me`) so the kill toast names who died.
+
+- **Unstick key (U).** New `unstick()` warps you to a free tile at the office
+  center (always open), for when you wedge yourself against furniture/walls.
+  Bound to `U`, added to the `?` help line. Personal-only, no shared change.
+
 ## 2026-09-17 — Drop Supabase presence, broadcast-only peers — SHIPPED
 After the election fix, the remaining symptom was: on join you see the other
 player for a second, nobody moves, then they vanish and you become host. That's

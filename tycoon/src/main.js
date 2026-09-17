@@ -48,7 +48,7 @@ async function boot() {
     else if (m.type === "monsterHit") receiveMonsterHit(m.king);
     else if (m.type === "attack") {
       const res = receiveAttack(m.name);
-      if (res && !res.ignore && net.send) net.send({ type: "attackResult", to: m.from, blocked: res.blocked, killed: res.killed, coins: res.coins, name: state.me.created ? state.me.name : "someone" });
+      if (res && !res.ignore && net.send) net.send({ type: "attackResult", to: m.from, blocked: res.blocked, killed: res.killed, coins: res.coins, name: res.name || (state.me.created ? state.me.name : "someone") });
     } else if (m.type === "attackResult") {
       if (m.blocked) flash("They blocked it — your weapon still broke.");
       else if (m.killed) { applyKillReward(m.coins, m.name); flash("You killed " + (m.name || "them") + "! Took " + (m.coins || 0) + "¢."); }

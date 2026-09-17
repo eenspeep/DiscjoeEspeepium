@@ -15,7 +15,7 @@ import {
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
@@ -60,6 +60,7 @@ export function initWorld(canvasEl, hooks = {}) {
     if (e.target.tagName === "INPUT") return;
     const k = e.key.toLowerCase();
     if (k === "q") { doAttack(); return; }
+    if (k === "u") { doUnstick(); return; }
     if (k === " " || k === "spacebar") { e.preventDefault(); doJump(); return; }
     if (k === "escape") { setBuild(null); return; }   // drop what's in hand
     if (k === "r" && buildType) { buildRot = (buildRot + 1) % 4; return; }
@@ -230,6 +231,12 @@ function doRecruit() {
   onTileMessage(r.ok ? "You leashed a rat! It's your buddy for an hour." : r.why);
 }
 
+function doUnstick() {
+  if (!state.me.created) return;
+  const r = unstick();
+  if (r.ok) onTileMessage("🧯 Unstuck — warped back to the center.");
+}
+
 function doJump() {
   if (!state.me.created) return;
   const r = tryJump();
@@ -259,7 +266,10 @@ function doAttack() {
     const r = killCharlie(best.ref.x, best.ref.y);
     onTileMessage(r.ok ? ("You gutted Garlic Charlie! +" + r.bounty + "¢ — your " + wname + " broke.") : "He slipped away.");
   } else {
-    if (sendMsg) sendMsg({ type: "attack", to: best.id, from: state.me.id, name: state.me.created ? state.me.name : "someone" });
+    // from MUST be our connection id (state.netId), not me.id: the victim replies
+    // attackResult `to: from`, and inbound messages are filtered by connection id.
+    // Using me.id meant the kill confirmation never reached us, so knives "didn't kill".
+    if (sendMsg) sendMsg({ type: "attack", to: best.id, from: state.netId, name: state.me.created ? state.me.name : "someone" });
     onTileMessage("You lunged at " + (best.name || "them") + " — your " + wname + " broke.");
   }
 }
@@ -495,7 +505,7 @@ function draw(t) {
       const ok = reach && f && hasSurface(f.type) && !(f.mods && f.mods[mouse.gx + "," + mouse.gy]);
       if (inBounds(mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(150,90,220,0.6)" : "rgba(230,80,70,0.45)");
     } else if (buildDoor) {
-      const ok = reach && inHall(s, mouse.gx, mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !s.furniture[mouse.gx + "," + mouse.gy] && !s.sites[mouse.gx + "," + mouse.gy];
+      const ok = reach && isWalkable(s, mouse.gx, mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !s.furniture[mouse.gx + "," + mouse.gy] && !s.sites[mouse.gx + "," + mouse.gy];
       if (isWalkable(s, mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(90,160,240,0.55)" : "rgba(230,80,70,0.45)");
     } else if (buildExpand) {
       const buyable = isBuyableTile(s, mouse.gx, mouse.gy) && canBuyTiles(s), ok = reach && buyable;
