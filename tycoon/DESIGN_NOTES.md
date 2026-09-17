@@ -4,6 +4,29 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Drop Supabase presence, broadcast-only peers — SHIPPED
+After the election fix, the remaining symptom was: on join you see the other
+player for a second, nobody moves, then they vanish and you become host. That's
+ongoing broadcasts not routing between clients. Presence with the newer
+publishable key (`sb_publishable_…`) can throw right after `SUBSCRIBED` and put
+the channel in a state where broadcast fan-out stops, so the one initial appear
+came from the join event and nothing after it landed (no movement), then the
+heartbeat-peer aged out and disappeared.
+
+Fix: cut presence entirely. The channel is now broadcast-only
+(`config.broadcast.self=false`), no `presence` key, no `channel.track`, no
+presence event handlers, no `presenceState()`. Peers come purely from broadcast
+`__hb` heartbeats (each carries position + look), which is all we ever needed.
+Every outbound send goes through one `sendMsg` that try/catches and counts
+failures into `stats.sendErr`, now shown in the `?joenet` readout, so we can
+tell "sends failing" from "sends not arriving." PEER_TTL bumped 6s → 8s.
+
+If this still doesn't route between two machines, the remaining suspect is the
+key itself: swap `SUPABASE.anonKey` in config.js for the project's legacy anon
+JWT (`eyJ…`, Supabase dashboard → Project Settings → API → Project API keys →
+`anon` `public`). The publishable key may not authenticate the Realtime socket
+the same way.
+
 ## 2026-09-17 — Host election id-space bug ("we're both host") — SHIPPED
 The reason two players were both host (and the office desynced / peers flickered
 out on refresh): host election compared each **peer's connection id** against

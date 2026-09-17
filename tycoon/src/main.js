@@ -74,7 +74,7 @@ async function boot() {
       const s = net.stats ? net.stats() : null;
       const ago = s && s.lastSharedT ? Math.round((Date.now() - s.lastSharedT) / 1000) + "s" : "never";
       box.textContent = s
-        ? `net ${net.mode}  ${state.isHost ? "HOST" : "guest"}  sub:${s.sub}\npeers:${s.peers}  hbIn:${s.hbIn}  opIn:${s.opIn}\nsharedIn:${s.sharedIn} (${ago})  out:${s.out}`
+        ? `net ${net.mode}  ${state.isHost ? "HOST" : "guest"}  sub:${s.sub}\npeers:${s.peers}  hbIn:${s.hbIn}  opIn:${s.opIn}\nsharedIn:${s.sharedIn} (${ago})\nout:${s.out}  sendErr:${s.sendErr ?? 0}`
         : `net ${net.mode}  ${state.isHost ? "HOST" : "guest"}  peers:${state.peers.length}`;
     }, 500);
   }
