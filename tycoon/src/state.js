@@ -112,9 +112,20 @@ function healMe(me) {
 // superpowers, and the display name. Idempotent — always from scratch.
 function recomputeIdentity(me) {
   if (!Array.isArray(me.adjectives)) me.adjectives = me.adjectiveWord ? [me.adjectiveWord] : [];
-  const { stats, traits, powers } = buildStatsFromWords(me.specialty, me.adjectives);
+  // Signature = the one adjective shown on your name (and 1.5x effective).
+  if (!me.signature || !me.adjectives.includes(me.signature)) me.signature = me.adjectives[0] || null;
+  const { stats, traits, powers } = buildStatsFromWords(me.specialty, me.adjectives, me.signature);
   me.stats = stats; me.traits = traits; me.powers = powers;
-  me.name = "JOEY" + (me.adjectives.length ? " " + me.adjectives.join(" ") : "");
+  me.name = "JOEY" + (me.signature ? " " + me.signature : "");   // only the signature appears
+}
+// Pick which owned adjective is your signature (shown on the name, 1.5x stronger).
+export function setSignature(word) {
+  const me = state.me;
+  if (!me.created || !Array.isArray(me.adjectives) || !me.adjectives.includes(word)) return { ok: false };
+  me.signature = word;
+  recomputeIdentity(me);
+  state.meDirty = true; saveMe(); notify();
+  return { ok: true, name: me.name };
 }
 
 function loadMe() {

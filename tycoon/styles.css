@@ -501,3 +501,10 @@ body {
 .ctx-menu { position: fixed; z-index: 80; min-width: 180px; max-width: 78vw; background: rgba(20,22,28,0.96); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 5px; box-shadow: 0 10px 30px rgba(0,0,0,0.4); display: flex; flex-direction: column; gap: 2px; }
 .ctx-item { text-align: left; background: transparent; color: #eef1f5; border: 0; border-radius: 7px; padding: 9px 11px; font: 600 13px "Fredoka", system-ui, sans-serif; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ctx-item:hover, .ctx-item:active { background: rgba(120,150,220,0.28); }
+
+/* ---- signature adjective picker (Locker) -------------------------------- */
+.sig-head { margin: 8px 0 4px; }
+.sig-row { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 4px; }
+.sig-chip { font: 800 12px "Fredoka", system-ui, sans-serif; letter-spacing: 0.3px; background: rgba(120,130,150,0.12); border: 1.5px solid transparent; border-radius: 999px; padding: 4px 10px; cursor: pointer; }
+.sig-chip:hover { background: rgba(120,150,220,0.18); }
+.sig-chip.on { background: rgba(255,255,255,0.14); font-weight: 900; }
