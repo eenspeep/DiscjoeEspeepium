@@ -639,6 +639,8 @@ export function tryJump() {
   const me = state.me; if (!me || !me.created) return { ok: false };
   const t = now();
   state.jumpAt = t;                       // world reads this for the hop arc
+  state.jumpPassUntil = t + TUNING.jumpPassMs;   // glide through one piece of furniture
+  state.jumpPassedKey = null;
   if (t >= (state.jumpCdUntil || 0)) {
     state.invulnUntil = t + TUNING.jumpInvulnMs;
     state.jumpCdUntil = t + TUNING.jumpCooldownMs;

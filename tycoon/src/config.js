@@ -93,6 +93,7 @@ export const TUNING = {
   jumpCooldownMs: 60 * 1000,           // the immunity only triggers once per this window
   jumpArcMs: 520,                      // how long the hop animation lasts
   jumpArcPx: 18,                       // peak hop height in design px
+  jumpPassMs: 700,                     // window to glide through one furniture piece
 };
 
 export const CHARLIE_ID = "garlic-charlie";

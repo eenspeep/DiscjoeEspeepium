@@ -12,7 +12,11 @@ cooldown still animates but grants nothing. `receiveAttack`/`receiveMonsterHit`
 short-circuit to a harmless dodge while `isInvulnerable()`, checked on the
 victim's own client. Jump state (`state.jumpAt`, `invulnUntil`, `jumpCdUntil`)
 is ephemeral, not saved. A golden pulsing ring shows during immunity; the sprite
-rises via a new `lift` draw option while its shadow stays grounded.
+rises via a new `lift` draw option while its shadow stays grounded. A jump also
+opens a `jumpPassMs` (700ms) window to glide through **one** furniture/site piece:
+`updateMe`'s collision lets you enter a blocked furniture tile mid-jump, locks
+`state.jumpPassedKey` to the first piece you land on, and blocks any other piece
+(and always Enzo, walls, void, locked doors, people).
 
 **Wall decor.** There is still no gameplay z-axis — height is faked in the
 renderer. Wall decor rides on that: pieces hang on a wall edge `(gx,gy,side)`
