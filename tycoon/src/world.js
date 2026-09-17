@@ -10,7 +10,7 @@ import {
   walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
   attackRangeFor, interactRange, buildRange, sizeMult, withinReach,
   enzoCells, isEnzoTile, enzoAnchor, hasLeash, petActive,
-  WALL_DECOR, wallIsReal, gearWorn, hasPower, powerList, isProtected,
+  WALL_DECOR, wallIsReal, gearWorn, hasPower, powerList, isProtected, roleOf, ROLE_META,
   isBuyableTile, tileFrontier, tileCost, canBuyTiles,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
@@ -777,9 +777,6 @@ function drawWall(gx, gy, side, w) {
   ctx.fillText(def.glyph, c.x, c.y + 0.5 * Z);
 }
 
-// tint by role (tag is the legacy key): research blue, build orange, gold gold.
-const TAG_TINT = { brain: "#4b56b8", build: "#c9772f", neutral: "#d4a72c" };
-
 // ---- furniture models -----------------------------------------------------
 // Each piece is drawn as shaped isometric volumes (a body of boxes plus a few
 // accent marks) so it reads as the actual object, not a colored cube with an
@@ -991,7 +988,7 @@ function furnTopH(g) {
 function drawFurniture(ax, ay, f, selected, using) {
   const def = FURNITURE[f.type];
   const broken = f.broken, Z = camera.zoom;
-  const tint = broken ? "#7c7c80" : (TAG_TINT[def.tag] || "#9aa3af");
+  const tint = broken ? "#7c7c80" : ((ROLE_META[roleOf(f.type)] || {}).tint || "#9aa3af");
   const cells = footprintCells(f.type, ax, ay, f.rot || 0);
   let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
   for (const [x, y] of cells) { minX = Math.min(minX, x); minY = Math.min(minY, y); maxX = Math.max(maxX, x); maxY = Math.max(maxY, y); }
@@ -1025,7 +1022,7 @@ function drawFurniture(ax, ay, f, selected, using) {
 function rrectW(x, y, w, h, r) { rrect(ctx, x, y, w, h, r); }
 
 function drawSite(ax, ay, site) {
-  const def = FURNITURE[site.type], tint = TAG_TINT[def.tag] || "#9aa3af";
+  const def = FURNITURE[site.type], tint = (ROLE_META[roleOf(site.type)] || {}).tint || "#9aa3af";
   const cells = footprintCells(site.type, ax, ay, site.rot || 0), z = def.h * 0.5 * camera.zoom;
   const prog = Math.min(1, siteProgress(site) / site.work);
   const building = state.me.created && isNearFootprint(state.me.pos, site.type, ax, ay, buildRange(state.me), site.rot || 0);
