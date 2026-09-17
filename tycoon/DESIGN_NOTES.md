@@ -4,6 +4,20 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Host ignores inbound full-state ("sold furniture reappears") — SHIPPED
+Selling furniture, then watching it reappear a moment later, is the host
+overwriting its own authoritative state from an inbound full-state broadcast.
+`onShared` replaced `state.shared` for everyone, host included. So a stale peer
+broadcast (or a second client that also thinks it's host, which is the state the
+owner reported) resurrects whatever the host just changed. Fix: `onShared` now
+early-returns when `state.isHost` — the authority never adopts someone else's
+full state. Guests still adopt it. Verified with a two-tab test where both are
+forced host: the host ignores the peer's furniture-bearing broadcast, and once
+demoted to guest it adopts it. Note this stops resurrection on the *host* side.
+A guest whose delete op never reaches the host is still a transport problem, and
+the underlying cloud broadcast delivery is the thing that has to be confirmed
+(via `?joenet` hbIn, or by swapping the publishable key for the anon JWT).
+
 ## 2026-09-17 — Doors anywhere, knife-kill fix, unstick key — SHIPPED
 Three requested fixes.
 

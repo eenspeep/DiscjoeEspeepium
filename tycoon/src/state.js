@@ -233,7 +233,12 @@ export async function initState(net) {
     applyOffline();
   } else centerMe();
 
-  net.onShared((rs) => { if (!rs || !rs.floor) return; state.shared = healShared(rs); notify(); });
+  // The host IS the authority for the shared office. It must never overwrite its
+  // own state from an inbound full-state broadcast — doing so let a stale peer
+  // (or a second client that also thinks it's host) resurrect things the host
+  // just changed, e.g. furniture you sold reappearing a moment later. Only
+  // non-hosts adopt the broadcast.
+  net.onShared((rs) => { if (state.isHost) return; if (!rs || !rs.floor) return; state.shared = healShared(rs); notify(); });
   net.onPeers((peers) => {
     state.peers = peers;   // the render loop reads positions from here every frame
     electHost();
