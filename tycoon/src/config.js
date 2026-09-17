@@ -102,6 +102,7 @@ export const TUNING = {
   soulPerLevelBase: 40,                 // soul for level 2
   soulPerLevelGrowth: 1.6,              // each further level costs this much more soul
   maxJoeLevel: 30,
+  signatureMult: 1.5,                   // your chosen "signature" adjective (the one shown) is this much stronger
   powerArmorCooldownMs: 60 * 60 * 1000, // "free armor / undying" powers recharge this often
   teleportRange: 10,                    // "blink" power: right-click within this many tiles to teleport
 

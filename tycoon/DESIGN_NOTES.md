@@ -4,6 +4,21 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Soul-level cost doubles + signature adjective — SHIPPED
+- **Soul leveling doubles per tier.** `soulForLevel` marginal cost is now
+  `soulPerLevelBase × 2^(i-1)` (base 40): tier 1 ×2, tier 2 ×4, tier 3 ×8, …
+  Totals: L2 80, L3 240, L4 560, mountingly steeper.
+- **Signature adjective.** Names no longer print every adjective in front of
+  JOEY. You pick ONE **signature** in the Locker (a chip row of every adjective
+  you've earned, colored by rarity); it's the only one shown on your name/world
+  label, and it's **1.5× effective** (`signatureMult`) on its own stats + traits.
+  The other adjectives still stack their perks at 1× — they just don't show.
+  `me.signature` defaults to your first adjective, migrates for old saves,
+  persists, and re-derives identity on change (`setSignature`). Stat points stay
+  whole (rounded); trait numbers can be 1.5× (e.g. a signature "+3 build" reads
+  "+4.5 build power"). Verified the doubling curve, the 1.5× on the signature
+  only, the name showing just the signature, and the Locker picker.
+
 ## 2026-09-17 — QOL: no pinch-zoom + right-click/long-press action menu — SHIPPED
 - **Pinch-to-zoom removed.** It kept firing by accident while tapping buttons on
   mobile. Two-finger touch does nothing now; zoom is the on-screen +/− buttons

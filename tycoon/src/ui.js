@@ -9,7 +9,7 @@ import {
   tryBuyItem, equipItem, unequipItem, moveItem, rotateItem, trySellItem,
   cancelSite, cancelBuild,
   tryLockDoor, tryUnlockDoor, tryRemoveDoor, checkDoorPassword,
-  tryBuyRatEgg, tryRepairFurniture, trySellWall, addAdjective, cheatBoost,
+  tryBuyRatEgg, tryRepairFurniture, trySellWall, addAdjective, setSignature, cheatBoost,
 } from "./state.js";
 
 // Debug boost is gated to a single account username.
@@ -172,12 +172,10 @@ function renderHud() {
 // that truncates (hover/drag to see the rest), plus a Joe Level chip that lights
 // up when you've levelled and can add another adjective.
 function nameBar(me) {
-  const words = me.adjectives || [];
+  // Only your SIGNATURE adjective shows on the name bar (pick it in the Locker).
+  const sig = me.signature, adj = sig && adjByWord(sig), tint = adj ? RARITY[adj.rarity].tint : "#cfd6e4";
   const spans = [el("span", { class: "nb-joey", text: "JOEY" })];
-  for (const w of words) {
-    const adj = adjByWord(w), tint = adj ? RARITY[adj.rarity].tint : "#cfd6e4";
-    spans.push(el("span", { class: "nb-adj", style: "color:" + tint, title: adj ? (RARITY[adj.rarity].label + (adjSummary(adj) ? " · " + adjSummary(adj) : "")) : w, text: w }));
-  }
+  if (sig) spans.push(el("span", { class: "nb-adj", style: "color:" + tint, title: adj ? (RARITY[adj.rarity].label + " · signature (1.5×)" + (adjSummary(adj) ? " · " + adjSummary(adj) : "")) : sig, text: sig }));
   const open = openAdjectiveSlots(me), lvl = joeLevel(me);
   const lvlChip = el("button", {
     class: "nb-lvl" + (open > 0 ? " ready" : ""),
@@ -466,6 +464,17 @@ function renderLocker() {
   const traitKeys = Object.keys(me.traits || {}).filter((k) => TRAITS[k] && me.traits[k]);
   if (traitKeys.length) {
     kids.push(el("div", { class: "trait-line" }, traitKeys.map((k) => el("span", { class: "trait-chip", title: TRAITS[k].label + ": " + TRAITS[k].per(me.traits[k]) }, [TRAITS[k].glyph + " " + TRAITS[k].per(me.traits[k])]))));
+  }
+
+  // signature picker: every adjective you've earned. The signature shows on your
+  // name and is 1.5x effective; the rest still stack their perks quietly.
+  const words = me.adjectives || [];
+  if (words.length) {
+    kids.push(el("div", { class: "sig-head small muted", text: "Name adjectives — tap one to make it your signature (shown on your name, 1.5× effect):" }));
+    kids.push(el("div", { class: "sig-row" }, words.map((w) => {
+      const a = adjByWord(w), tint = a ? RARITY[a.rarity].tint : "#cfd6e4", on = me.signature === w;
+      return el("button", { class: "sig-chip" + (on ? " on" : ""), style: "color:" + tint + (on ? ";border-color:" + tint : ""), title: a ? (RARITY[a.rarity].label + (adjSummary(a) ? " · " + adjSummary(a) : "")) : w, onclick: () => { const r = setSignature(w); if (r.ok) flash("✍️ Signature: " + w); } }, [(on ? "✍️ " : "") + w]);
+    })));
   }
 
   // account row

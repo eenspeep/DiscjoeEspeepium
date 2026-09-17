@@ -234,30 +234,37 @@ export function rollAdjectives(n, excludeWords = []) {
   return out;
 }
 // Aggregate a specialty's starting stats with EVERY adjective on the Joey's
-// name (each word keeps stacking its perks). Returns stats + traits + powers.
-export function aggregateAdjs(specialtyId, adjs) {
+// name (each word keeps stacking its perks). The chosen SIGNATURE adjective (the
+// one shown on your name) counts for signatureMult (1.5x) on its stats + traits.
+// Returns stats + traits + powers.
+export function aggregateAdjs(specialtyId, adjs, signatureWord) {
   const spec = SPECIALTIES[specialtyId] || SPECIALTIES.research;
   const stats = { brain: spec.start.brain, build: spec.start.build };
   const traits = {}, powers = [];
   for (const adj of (adjs || [])) {
     if (!adj) continue;
-    if (adj.stats) { stats.brain += adj.stats.brain || 0; stats.build += adj.stats.build || 0; }
-    for (const [k, v] of Object.entries(adj.traits || {})) traits[k] = (traits[k] || 0) + v;
+    const m = (signatureWord && adj.word === signatureWord) ? (TUNING.signatureMult || 1.5) : 1;
+    if (adj.stats) { stats.brain += (adj.stats.brain || 0) * m; stats.build += (adj.stats.build || 0) * m; }
+    for (const [k, v] of Object.entries(adj.traits || {})) traits[k] = round1((traits[k] || 0) + v * m);
     for (const p of adjPowers(adj)) if (!powers.includes(p)) powers.push(p);
   }
+  stats.brain = Math.round(stats.brain); stats.build = Math.round(stats.build);   // stat "points" stay whole
   return { stats, traits, powers };
 }
-export function buildStats(specialtyId, adj) { return aggregateAdjs(specialtyId, adj ? [adj] : []); }
-export function buildStatsFromWords(specialtyId, words) { return aggregateAdjs(specialtyId, (words || []).map(adjByWord).filter(Boolean)); }
+function round1(n) { return Math.round(n * 10) / 10; }
+export function buildStats(specialtyId, adj) { return aggregateAdjs(specialtyId, adj ? [adj] : [], adj && adj.word); }
+export function buildStatsFromWords(specialtyId, words, signatureWord) { return aggregateAdjs(specialtyId, (words || []).map(adjByWord).filter(Boolean), signatureWord); }
 
 // ---- Joe Levels (from SOUL) -----------------------------------------------
 // Your total SOUL is your Joe Level. Each level past 1 lets you add one more
 // adjective to your name. Costs grow so higher levels are a real grind.
+// Each level doubles: the marginal cost to reach level i is base * 2^(i-1), so
+// tier 1 costs x2, tier 2 x4, tier 3 x8, ... — mountingly more expensive.
 export function soulForLevel(L) {
   if (L <= 1) return 0;
-  let need = 0, step = TUNING.soulPerLevelBase;
-  for (let i = 2; i <= L; i++) { need += step; step = Math.ceil(step * TUNING.soulPerLevelGrowth); }
-  return need;
+  let need = 0;
+  for (let i = 2; i <= L; i++) need += TUNING.soulPerLevelBase * Math.pow(2, i - 1);
+  return Math.round(need);
 }
 export function joeLevel(me) {
   const soul = (me && me.soul) || 0; let L = 1;
