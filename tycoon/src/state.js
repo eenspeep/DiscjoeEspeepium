@@ -922,7 +922,7 @@ export function killCharlie(cx, cy) {
 export function charlieEatRat(id) {
   if (!state.isHost) return { ok: false };
   const s = state.shared, m = s.monsters && s.monsters[id];
-  if (!m || m.kind !== "rat") return { ok: false };
+  if (!m || m.kind !== "rat" || !m.tired) return { ok: false };   // only worn-down strays
   const key = Math.round(m.x) + "," + Math.round(m.y);
   if (m.armored && m.armor) addLoot(key, [m.armor]);
   sharedOp({ t: "monster-", id });

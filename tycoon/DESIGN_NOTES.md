@@ -14,6 +14,8 @@ These are the source of truth for planned work; read this before picking up
   loot if it had any) and syncs via the monster op. Non-hosts just see him chase;
   the host authoritatively removes the rat. Verified the thresholds, host-only
   removal, and Charlie actually catching a room rat in the live loop.
+  Update: he only targets **tired** rats now (cleans up strays, doesn't steal
+  fresh kills) — the world filter and `charlieEatRat` both require `m.tired`.
 
 ## 2026-09-17 — Fingerless Gloves (tier-1 gear) — SHIPPED
 New tier-1 hands item (`fingerless`, glyph 🧤, costUnit 1.15 → price 1035, the
