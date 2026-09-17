@@ -56,28 +56,7 @@ export function drawJoey(ctx, cx, cy, { look, worn = {}, scale = 1, walking = fa
   // torso
   ctx.fillStyle = shirt; rrect(ctx, -8 * S, -14 * S, 16 * S, 18 * S, 5 * S);
   ctx.fillStyle = shade(shirt, -14); rrect(ctx, -10.5 * S, -12 * S, 4 * S, 13 * S, 2 * S); rrect(ctx, 6.5 * S, -12 * S, 4 * S, 13 * S, 2 * S);
-  if (worn.torso) { ctx.fillStyle = worn.torso.color || "#888"; rrect(ctx, -7 * S, -13 * S, 14 * S, 15 * S, 4 * S); ctx.fillStyle = shade(shirt, -6); ctx.fillRect(-1 * S, -13 * S, 2 * S, 15 * S); }
-
-  if (worn.hands) drawHands(ctx, worn.hands, S);
-
-  // shield strapped to the left arm (any equipped shield-art gear)
-  const shieldSlot = ["torso", "head", "legs", "feet", "hands", "eyes", "nose"].map((s) => worn[s]).find((wsl) => wsl && wsl.art === "shield");
-  if (shieldSlot) {
-    ctx.fillStyle = shieldSlot.color || "#54648a";
-    ctx.beginPath();
-    ctx.moveTo(-11.5 * S, -8 * S); ctx.lineTo(-6 * S, -10 * S); ctx.lineTo(-6 * S, 1 * S);
-    ctx.quadraticCurveTo(-8.5 * S, 4 * S, -11.5 * S, 1 * S); ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = shade(shieldSlot.color || "#54648a", -30); ctx.lineWidth = 1.2 * S; ctx.stroke();
-    ctx.strokeStyle = shade(shieldSlot.color || "#54648a", 40); ctx.lineWidth = 1 * S;
-    ctx.beginPath(); ctx.moveTo(-8.7 * S, -8 * S); ctx.lineTo(-8.7 * S, 1.5 * S); ctx.stroke();
-  }
-  // weapon in the right hand
-  if (worn.weapon) {
-    ctx.strokeStyle = "#5a3b22"; ctx.lineWidth = 2.4 * S; ctx.lineCap = "round";
-    ctx.beginPath(); ctx.moveTo(8 * S, 1 * S); ctx.lineTo(9.5 * S, -2 * S); ctx.stroke();
-    ctx.strokeStyle = worn.weapon.color || "#b6bcc6"; ctx.lineWidth = 2.6 * S;
-    ctx.beginPath(); ctx.moveTo(9.5 * S, -2 * S); ctx.lineTo(13 * S, -10 * S); ctx.stroke();
-  }
+  paintTorsoGear(ctx, worn, S, shirt);
 
   // head (paper-white, with a faint outline so it reads on light/transparent bg)
   ctx.fillStyle = skin; ctx.beginPath(); ctx.arc(0, -21 * S, 8.4 * S, 0, 7); ctx.fill();
@@ -112,6 +91,35 @@ export function drawJoey(ctx, cx, cy, { look, worn = {}, scale = 1, walking = fa
     ctx.fillStyle = "rgba(20,22,28,0.72)"; rrect(ctx, cx - w / 2, ny - 8 * S, w, 16 * S, 8 * S);
     ctx.fillStyle = "#eef1f5"; ctx.fillText(name, cx, ny); ctx.restore();
   }
+}
+
+// Body-region equipped gear (torso plate, hand item, shield on arm, weapon in
+// hand). Shared by the vector Joey and the sprite overlay, drawn in the same
+// local frame (origin at body center, feet ≈ +10·S, head ≈ −21·S).
+function paintTorsoGear(ctx, worn, S, shirt) {
+  if (worn.torso) { ctx.fillStyle = worn.torso.color || "#888"; rrect(ctx, -7 * S, -13 * S, 14 * S, 15 * S, 4 * S); ctx.fillStyle = shade(shirt || "#2f9c95", -6); ctx.fillRect(-1 * S, -13 * S, 2 * S, 15 * S); }
+  if (worn.hands) drawHands(ctx, worn.hands, S);
+  const shieldSlot = ["torso", "head", "legs", "feet", "hands", "eyes", "nose"].map((s) => worn[s]).find((wsl) => wsl && wsl.art === "shield");
+  if (shieldSlot) {
+    ctx.fillStyle = shieldSlot.color || "#54648a";
+    ctx.beginPath();
+    ctx.moveTo(-11.5 * S, -8 * S); ctx.lineTo(-6 * S, -10 * S); ctx.lineTo(-6 * S, 1 * S);
+    ctx.quadraticCurveTo(-8.5 * S, 4 * S, -11.5 * S, 1 * S); ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = shade(shieldSlot.color || "#54648a", -30); ctx.lineWidth = 1.2 * S; ctx.stroke();
+    ctx.strokeStyle = shade(shieldSlot.color || "#54648a", 40); ctx.lineWidth = 1 * S;
+    ctx.beginPath(); ctx.moveTo(-8.7 * S, -8 * S); ctx.lineTo(-8.7 * S, 1.5 * S); ctx.stroke();
+  }
+  if (worn.weapon) {
+    ctx.strokeStyle = "#5a3b22"; ctx.lineWidth = 2.4 * S; ctx.lineCap = "round";
+    ctx.beginPath(); ctx.moveTo(8 * S, 1 * S); ctx.lineTo(9.5 * S, -2 * S); ctx.stroke();
+    ctx.strokeStyle = worn.weapon.color || "#b6bcc6"; ctx.lineWidth = 2.6 * S;
+    ctx.beginPath(); ctx.moveTo(9.5 * S, -2 * S); ctx.lineTo(13 * S, -10 * S); ctx.stroke();
+  }
+}
+function paintFaceGear(ctx, worn, S) {
+  if (worn.nose) drawNose(ctx, worn.nose, S);
+  if (worn.eyes) drawEyes(ctx, worn.eyes, S);
+  if (worn.head) drawHead(ctx, worn.head, S);
 }
 
 // ---- optional pixel sprites -----------------------------------------------
@@ -165,7 +173,10 @@ function nameTag(ctx, cx, topY, name, S) {
   ctx.fillStyle = "#eef1f5"; ctx.fillText(name, cx, ny); ctx.restore();
 }
 // Returns true if it painted a sprite; false means "fall back to procedural".
-export function drawJoeySprite(ctx, cx, cy, { look, scale = 1, walking = false, t = 0, name = "", using = false } = {}) {
+// Gear frame over the sprite. The sprite is 46·scale tall with feet at footY;
+// these map the procedural gear coords (feet +10·S, head −21·S) onto it. Tunable.
+const GEAR_SCALE = 1.16, GEAR_FEET = 11;
+export function drawJoeySprite(ctx, cx, cy, { look, worn = {}, scale = 1, walking = false, t = 0, name = "", using = false } = {}) {
   const cv = recoloredJoey(lookColor(look, "stache"), lookColor(look, "shirt"));
   if (!cv) return false;
   const aspect = cv.width / cv.height, H = 46 * scale, W = H * aspect;
@@ -180,6 +191,12 @@ export function drawJoeySprite(ctx, cx, cy, { look, scale = 1, walking = false, 
   ctx.restore();
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(cv, cx - dw / 2, footY - dh, dw, dh);
+  // layer equipped gear on top of the sprite body
+  const Sg = scale * GEAR_SCALE, oy = footY - GEAR_FEET * Sg;
+  ctx.save(); ctx.translate(cx, oy);
+  paintTorsoGear(ctx, worn, Sg, lookColor(look, "shirt"));
+  paintFaceGear(ctx, worn, Sg);
+  ctx.restore();
   if (name) nameTag(ctx, cx, footY - dh, name, scale);
   return true;
 }
