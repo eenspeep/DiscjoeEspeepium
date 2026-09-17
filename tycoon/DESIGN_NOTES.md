@@ -4,6 +4,14 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Tired rats can wake when hit (50%) — SHIPPED
+Hitting a worn-down (tired/docile) rat now has a 50% chance to startle it awake
+— it drops back into hunting mode (attacks reset) instead of taking the blow,
+and your weapon still breaks, so finishing a tired rat is a gamble. Active rats
+are unaffected. Wired as a `monsterWake` op (syncs through host-authority);
+`TUNING.ratWakeChance = 0.5`. World shows a "😾 woke up" toast. Verified ~48%
+over 400 hits, woken rats un-tire, active rats never trigger it.
+
 ## 2026-09-17 — Joe Levels, multi-adjective names, JAAIME superpowers — SHIPPED
 Big content drop.
 - **Rat gold** now rolls 600–2500 (was 1–1000). Shielded rats pay 2× (tracked

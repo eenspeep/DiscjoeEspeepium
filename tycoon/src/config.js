@@ -85,7 +85,8 @@ export const TUNING = {
   ratEggCost: 350,                      // instant-use egg spawns one rat
   ratSpawnMs: 10 * 60 * 1000,           // Rat Motel spawns level-many rats this often
   ratMaxAlive: 10,                      // >10 rats coalesce into a Rat King
-  ratAttacks: 3,                        // a rat tires (despawns) after this many attacks
+  ratAttacks: 3,                        // a rat tires (goes docile) after this many attacks
+  ratWakeChance: 0.5,                   // hitting a tired rat has this chance to wake it (hunting again) instead of landing
   ratAttackMs: 1000,                    // one attack per second
   ratSpeed: 2.2,                        // tiles/sec
   ratArmorChance: 0.06,                 // rare chance a rat spawns wearing a shield
