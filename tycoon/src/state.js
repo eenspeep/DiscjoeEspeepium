@@ -26,6 +26,7 @@ const round2 = (n) => Math.round(n * 100) / 100;
 
 export const state = {
   me: null, shared: null, peers: [], isHost: true, net: null,
+  netId: null,       // this connection's id (net.myId); the id peers advertise. Host election runs in THIS space, not me.id.
   dirty: false, meDirty: false, lastOffline: null,
   account: null,     // { userId, username } when logged in
 };
@@ -207,6 +208,7 @@ function healShared(s) {
 
 export async function initState(net) {
   state.net = net;
+  state.netId = net.myId || null;   // peers advertise this id; elect on it, never on me.id (a peer's id and me.id are different id spaces, so comparing them makes host election a coin flip — both-host or both-guest)
   state.me = loadMe();
 
   const remote = await net.getInitialShared();
@@ -232,9 +234,14 @@ export async function initState(net) {
   return state;
 }
 
+// The office needs exactly one writer. Everyone runs the same rule: lowest id
+// wins. The ids MUST come from one space — peers advertise their connection id
+// (net.myId), so we compare against ours (state.netId), never me.id.
 function electHost() {
+  const mine = state.netId || state.me?.id;
+  if (!mine) { state.isHost = true; return; }
   let host = true;
-  for (const p of state.peers) if (p.id && p.id < state.me.id) { host = false; break; }
+  for (const p of state.peers) if (p.id && p.id < mine) { host = false; break; }
   state.isHost = host;
 }
 
