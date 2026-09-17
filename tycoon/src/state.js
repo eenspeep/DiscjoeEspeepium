@@ -17,7 +17,7 @@ import {
   footprintCells, blockedTiles, furnitureAnchorAt, hasSurface, isModUnlocked, modPrice,
   equippedWeapon, lowestShield, equippedShields, blackMarkCells,
   buildRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal, withinReach, repairCost,
-  hasLeash, petActive,
+  hasLeash, petActive, enzoPetValue,
   WALL_DECOR, wallPrice, isWallUnlocked, wallIsReal,
   tileCost, canBuyTiles, isBuyableTile,
 } from "./economy.js";
@@ -1260,9 +1260,10 @@ export function votePot(proposalId) {
 // Click the Enzo statue for a coin. Personal wallet only, no shared write.
 export function tryClickEnzo() {
   if (!state.me || !state.me.created) return { ok: false };
-  state.me.credits = round2(state.me.credits + 1);
+  const gain = enzoPetValue(state.me);   // Fingerless Gloves raise this
+  state.me.credits = round2(state.me.credits + gain);
   state.meDirty = true; notify();
-  return { ok: true };
+  return { ok: true, gain };
 }
 
 export function inBounds(gx, gy) { const f = state.shared.floor; return gx >= f.x && gy >= f.y && gx < f.x + f.w && gy < f.y + f.h; }
