@@ -4,6 +4,23 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Free-form floor expansion (buy one tile at a time) — SHIPPED
+Replaced buying a whole room in bulk with claiming floor one square at a time
+out of the fog of war, so the office grows into any isometric shape the owner
+draws. `shared.tiles` is a `{"gx,gy":1}` map of individually bought tiles,
+threaded through `walkableSet`/`isWalkable`/`isProtected`/`floorBounds` so a
+bought tile is real floor everywhere (walking, building, camera bounds). A tile
+is buyable only if it's **void**, **orthogonally adjacent to existing floor**
+(the frontier), and **within your interact range** (`withinReach`) — you stand
+at the edge and push the border outward. Price escalates per tile owned
+(`tileCost` = `ceil(60 × 1.012^count)`), capped at `maxTiles` (600). Buying is a
+shared op (`tile+`/`tile-`) so it syncs through the host-authoritative netcode
+and recomputes `shared.floor`. Hold **🧭 Expand Floor** from the Shop's
+Expansion section: the fog frontier draws as a faint ring always, lights green
+where you can reach, and the hovered tile shows a live cost pill (green =
+affordable/in reach, orange = too far). The old bulk "Add Room" shop entry is
+gone.
+
 ## 2026-09-17 — Host-authoritative netcode (fixes clobbering) — SHIPPED
 Root cause of "really fucky": every client wrote the shared office and
 broadcast the whole state, so concurrent edits (and per-tick build/research

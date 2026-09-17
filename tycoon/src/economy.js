@@ -603,13 +603,33 @@ export function roomCost(shared) {
 }
 export function canAddRoom(shared) { return (shared.rooms ? shared.rooms.length : 1) < TUNING.maxRooms; }
 
+// Free-form expansion: you buy floor one tile at a time out of the surrounding
+// void ("fog"). Owned single tiles live in shared.tiles as a { "gx,gy": 1 } map.
+export function tileCount(shared) { return shared.tiles ? Object.keys(shared.tiles).length : 0; }
+export function tileCost(shared) { return Math.ceil(TUNING.tileCost * Math.pow(TUNING.tileGrowth, tileCount(shared))); }
+export function canBuyTiles(shared) { return tileCount(shared) < TUNING.maxTiles; }
+// A tile is buyable if it's void now but orthogonally touches existing floor
+// (you can only grow the shape outward from its edge).
+export function isBuyableTile(shared, gx, gy) {
+  if (isWalkable(shared, gx, gy)) return false;
+  return isWalkable(shared, gx - 1, gy) || isWalkable(shared, gx + 1, gy) || isWalkable(shared, gx, gy - 1) || isWalkable(shared, gx, gy + 1);
+}
+// The set of buyable void tiles hugging the whole office edge (the "fog frontier").
+export function tileFrontier(shared) {
+  const walk = walkableSet(shared), out = new Set();
+  for (const k of walk) { const [x, y] = k.split(",").map(Number); for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) { const nk = (x + dx) + "," + (y + dy); if (!walk.has(nk)) out.add(nk); } }
+  return out;
+}
+
 export function walkableSet(shared) {
   const s = new Set();
   for (const r of (shared.rooms || [])) for (let i = 0; i < r.w; i++) for (let j = 0; j < r.h; j++) s.add((r.x + i) + "," + (r.y + j));
   for (const h of (shared.halls || [])) for (let i = 0; i < h.w; i++) for (let j = 0; j < h.h; j++) s.add((h.x + i) + "," + (h.y + j));
+  if (shared.tiles) for (const k in shared.tiles) s.add(k);
   return s;
 }
 export function isWalkable(shared, gx, gy) {
+  if (shared.tiles && shared.tiles[gx + "," + gy]) return true;
   for (const r of (shared.rooms || [])) if (gx >= r.x && gx < r.x + r.w && gy >= r.y && gy < r.y + r.h) return true;
   for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
   return false;
@@ -618,10 +638,11 @@ export function inHall(shared, gx, gy) {
   for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
   return false;
 }
-// A tile is "protected" (communal) if it sits in a room flagged protected, or in
-// any office hallway. Furniture in a protected tile can be sold by anyone, and
-// the refund goes back to whoever paid for it.
+// A tile is "protected" (communal) if it sits in a room flagged protected, in any
+// office hallway, or is a bought free-form tile. Furniture in a protected tile can
+// be sold by anyone, and the refund goes back to whoever paid for it.
 export function isProtected(shared, gx, gy) {
+  if (shared.tiles && shared.tiles[gx + "," + gy]) return true;
   for (const r of (shared.rooms || [])) if (r.protected && gx >= r.x && gx < r.x + r.w && gy >= r.y && gy < r.y + r.h) return true;
   for (const h of (shared.halls || [])) if (gx >= h.x && gx < h.x + h.w && gy >= h.y && gy < h.y + h.h) return true;
   return false;
@@ -649,6 +670,7 @@ export function floorBounds(shared) {
   const eat = (r) => { minX = Math.min(minX, r.x); minY = Math.min(minY, r.y); maxX = Math.max(maxX, r.x + r.w - 1); maxY = Math.max(maxY, r.y + r.h - 1); };
   for (const r of (shared.rooms || [])) eat(r);
   for (const h of (shared.halls || [])) eat(h);
+  if (shared.tiles) for (const k in shared.tiles) { const [x, y] = k.split(",").map(Number); eat({ x, y, w: 1, h: 1 }); }
   if (minX === Infinity) return { x: 0, y: 0, w: 9, h: 9 };
   return { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
 }

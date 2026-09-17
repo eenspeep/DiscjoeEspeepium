@@ -19,6 +19,7 @@ import {
   buildRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal, withinReach, repairCost,
   hasLeash, petActive,
   WALL_DECOR, wallPrice, isWallUnlocked, wallIsReal,
+  tileCost, canBuyTiles, isBuyableTile,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -178,13 +179,14 @@ function defaultShared() {
   furniture[`1,1`] = { type: "chair", level: 1, by: [] };
   furniture[`2,1`] = { type: "workbench", level: 1, by: [] };
   furniture[`1,2`] = { type: "snacktable", level: 1, by: [] };
-  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, walls: {}, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now(), gear: {} }, research: { contrib: {} }, pot: defaultPot() };
+  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], tiles: {}, doors: {}, floor: { x: 0, y: 0, w, h }, furniture, walls: {}, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now(), gear: {} }, research: { contrib: {} }, pot: defaultPot() };
 }
 function healShared(s) {
   if (!s.rooms) { const w = (s.floor && s.floor.w) || 9, h = (s.floor && s.floor.h) || 9; s.rooms = [{ x: 0, y: 0, w, h }]; }
   // every office room is protected (communal furniture); backfill old saves
   for (const r of s.rooms) if (r.protected === undefined) r.protected = true;
   if (!s.halls) s.halls = [];
+  if (!s.tiles) s.tiles = {};
   if (!s.doors) s.doors = {};
   if (!s.furniture) s.furniture = {};
   if (!s.walls) s.walls = {};
@@ -359,6 +361,8 @@ export function applyOp(s, op) {
     case "door-": delete s.doors[op.key]; break;
     case "doorLock": { const d = s.doors[op.key]; if (d) { d.locked = op.locked; if ("hash" in op) d.hash = op.hash; } break; }
     case "rooms": s.rooms = op.rooms; s.halls = op.halls; s.floor = op.floor; break;
+    case "tile+": s.tiles = s.tiles || {}; s.tiles[op.key] = 1; s.floor = floorBounds(s); break;
+    case "tile-": if (s.tiles) delete s.tiles[op.key]; s.floor = floorBounds(s); break;
     case "owed+": s.owed = s.owed || {}; s.owed[op.pid] = round2((s.owed[op.pid] || 0) + op.amt); break;
     case "owed-": if (s.owed) delete s.owed[op.pid]; break;
     case "contrib": { s.research = s.research || { contrib: {} }; s.research.contrib = s.research.contrib || {}; s.research.contrib[op.pid] = round2((s.research.contrib[op.pid] || 0) + op.rp); break; }
@@ -556,6 +560,20 @@ export function tryAddRoom() {
   sharedOp({ t: "rooms", rooms, halls, floor: floorBounds({ rooms, halls }) });
   commit();
   return { ok: true, room };
+}
+// Buy one floor tile out of the fog: it must be void, orthogonally touch existing
+// floor, and be within reach (you expand from the edge you're standing on).
+export function tryBuyTile(gx, gy) {
+  const s = state.shared;
+  if (!canBuyTiles(s)) return { ok: false, why: "The office is at its maximum size." };
+  if (!isBuyableTile(s, gx, gy)) return { ok: false, why: "Expand into the fog right next to your floor." };
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand at the edge to expand there." };
+  const cost = tileCost(s);
+  if (state.me.credits < cost) return { ok: false, why: "Not enough credits (" + cost + ")." };
+  spend(cost);
+  sharedOp({ t: "tile+", key: gx + "," + gy });
+  commit();
+  return { ok: true, cost };
 }
 
 // ---- doors ----------------------------------------------------------------

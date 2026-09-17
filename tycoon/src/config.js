@@ -39,6 +39,11 @@ export const TUNING = {
   roomGrowth: 1.55,             // each subsequent room costs this much more
   maxRooms: 16,
 
+  // Free-form expansion: buy floor one tile at a time out of the fog.
+  tileCost: 60,                 // price of your next floor tile
+  tileGrowth: 1.012,            // each tile you own nudges the next one's price up
+  maxTiles: 600,                // total bought tiles cap
+
   // Doors + password locks (gated behind research). Locks are expensive.
   doorTier: 3,
   doorCost: 500,
