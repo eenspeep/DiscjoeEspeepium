@@ -10,12 +10,12 @@ import {
   walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
   attackRangeFor, interactRange, buildRange, sizeMult, withinReach,
   enzoCells, isEnzoTile, enzoAnchor, hasLeash, petActive,
-  WALL_DECOR, wallIsReal, gearWorn, hasPower, powerList,
+  WALL_DECOR, wallIsReal, gearWorn, hasPower, powerList, isProtected,
   isBuyableTile, tileFrontier, tileCost, canBuyTiles,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick, tryTeleport } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick, tryTeleport, charlieEatRat } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
@@ -411,7 +411,15 @@ function updateNPCs(dt) {
   const solid = (gx, gy) => { const k = gx + "," + gy; if (!walk.has(k) || blocked.has(k)) return true; const d = doors[k]; return !!(d && d.locked); };
   let walkList = null;
   const pick = () => { if (!walkList) walkList = [...walk].map((k) => k.split(",").map(Number)).filter(([x, y]) => !solid(x, y)); return walkList.length ? walkList[Math.floor(Math.random() * walkList.length)] : null; };
+  // Charlie hunts rats that are standing in a protected (communal) room.
+  const protRats = Object.entries(s.monsters || {}).filter(([id, m]) => m.kind === "rat" && isProtected(s, Math.round(m.x), Math.round(m.y)));
   for (const n of activeBots()) {
+    let hunt = null, hd = Infinity;
+    for (const [id, m] of protRats) { const d = Math.hypot(m.x - n.x, m.y - n.y); if (d < hd) { hd = d; hunt = { id, x: m.x, y: m.y }; } }
+    if (hunt) {                                  // chase the nearest protected-room rat
+      n.target = { x: hunt.x, y: hunt.y }; n.pause = 0;
+      if (hd < 1.35 && state.isHost) charlieEatRat(hunt.id);   // caught it — host removes it
+    }
     n.pause -= dt;
     if (!n.target && n.pause <= 0) { const t = pick(); if (t) n.target = { x: t[0], y: t[1] }; }
     if (n.target && n.pause <= 0) {

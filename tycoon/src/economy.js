@@ -19,7 +19,7 @@ export function tierCost(t) { return COST_K * FACT[t]; }
 export function tierPower(t) { return POWER_P * FACT[t]; }
 
 // cumulative research points to reach each tier (index = tier; tier 1 is free)
-const RESEARCH_TIERS = [0, 0, 120, 360, 900, 2200, 5200, 12000, 28000, 66000, 150000];
+const RESEARCH_TIERS = [0, 0, 1200, 3600, 9000, 22000, 52000, 120000, 280000, 660000, 1500000];
 
 export const TIER_NAME = [
   "", "Supply Closet", "Break Room", "Cubicle Farm", "Server Room", "R&D Lab",

@@ -4,6 +4,17 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Research tiers x10 + Charlie hunts protected-room rats — SHIPPED
+- **Research 10x pricier.** `RESEARCH_TIERS` all multiplied by 10 (tier 2 now
+  1200, …, tier 10 now 1,500,000). Tiers unlock 10x slower.
+- **Charlie is pest control.** Garlic Charlie (a client-side wandering bot) now
+  chases the nearest rat standing on a protected/communal tile (`isProtected`)
+  on every client, and when the HOST's Charlie reaches it (<1.35 tiles) he eats
+  it: `charlieEatRat(id)` removes the monster host-side (dropping its armor as
+  loot if it had any) and syncs via the monster op. Non-hosts just see him chase;
+  the host authoritatively removes the rat. Verified the thresholds, host-only
+  removal, and Charlie actually catching a room rat in the live loop.
+
 ## 2026-09-17 — Fingerless Gloves (tier-1 gear) — SHIPPED
 New tier-1 hands item (`fingerless`, glyph 🧤, costUnit 1.15 → price 1035, the
 priciest tier-1 buyable). Equipped, petting Enzo pays +5 instead of +1, via a
