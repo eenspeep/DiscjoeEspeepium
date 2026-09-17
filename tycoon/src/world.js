@@ -10,7 +10,7 @@ import {
   walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
   attackRangeFor, interactRange, buildRange, sizeMult, withinReach,
   enzoCells, isEnzoTile, enzoAnchor, hasLeash, petActive,
-  WALL_DECOR, wallIsReal,
+  WALL_DECOR, wallIsReal, gearWorn,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
@@ -371,6 +371,7 @@ function updateNPCs(dt) {
   if (alive && !charlie._alive) { const r0 = s.rooms[0]; charlie.x = r0.x + 1; charlie.y = r0.y + 1; charlie.target = null; charlie.pause = 1; }
   charlie._alive = alive;
   if (!alive) return;
+  charlie.worn = gearWorn((s.charlie && s.charlie.gear) || {});   // show whatever gear he's bought
   const solid = (gx, gy) => { const k = gx + "," + gy; if (!walk.has(k) || blocked.has(k)) return true; const d = doors[k]; return !!(d && d.locked); };
   let walkList = null;
   const pick = () => { if (!walkList) walkList = [...walk].map((k) => k.split(",").map(Number)).filter(([x, y]) => !solid(x, y)); return walkList.length ? walkList[Math.floor(Math.random() * walkList.length)] : null; };

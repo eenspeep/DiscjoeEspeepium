@@ -4,6 +4,19 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Garlic Charlie buys gear (no more furniture) — SHIPPED
+Charlie no longer drops furniture into the office (that cluttered the room and
+annoyed the owner). Instead he periodically buys a random equippable gear item
+into `shared.charlie.gear` (slot→type, host-driven). Capacity is
+`charlieMaxGear` (4): if the slot is full or he's at capacity he either swaps it
+in (the old piece is gone) or tosses the new one — discards just vanish, no
+ground clutter. His loadout renders on his body via the sprite gear overlay
+(`gearWorn(gear)` → worn art, set on the Charlie bot each frame). Killing him
+now drops his actual worn gear as loot (padded with a couple of randoms if he
+has fewer than two), and clears his gear; he respawns naked and re-shops. Buy
+cadence sped up a little (3–10 min). Removed `charlieMaxFurniture`,
+`charlieMaybeBuy`, `charlieFreeTile`.
+
 ## 2026-09-17 — Jump + wall decor — SHIPPED
 **Jump.** Space (or the Jump button, also for touch) hops the Joey on a short
 arc. If the guard is off cooldown the hop also grants `jumpInvulnMs` (1s) of

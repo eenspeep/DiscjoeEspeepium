@@ -549,6 +549,12 @@ export function wornArt(me) {
   }
   return out;
 }
+// Resolve a slot->itemType map (e.g. Charlie's gear) to worn art for drawing.
+export function gearWorn(gear) {
+  const out = {};
+  for (const [slot, type] of Object.entries(gear || {})) if (ITEMS[type]) out[slot] = { art: ITEMS[type].art, color: ITEMS[type].color };
+  return out;
+}
 export function income(me, shared, { passiveOnly = false } = {}) {
   const sc = statScales(me);
   let flat = TUNING.baseIncome + TUNING.statFlat * ((me.stats?.brain || 0) + (me.stats?.build || 0));
