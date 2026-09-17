@@ -161,7 +161,7 @@ function onClick() {
   if (isEnzoTile(state.shared, gx, gy)) {
     if (adjacentToEnzo(state.me.pos)) {
       const r = tryClickEnzo();
-      if (r.ok) { enzoClickT = now() / 1000; onTileMessage("🐱 Enzo blesses you (+1¢)"); }
+      if (r.ok) { enzoClickT = now() / 1000; onTileMessage("🐱 Enzo blesses you (+" + r.gain + "¢)"); }
     } else {
       const spot = nearestEnzoApproach();   // too far — walk up to it instead of coining
       if (spot) target = spot;

@@ -4,6 +4,13 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Fingerless Gloves (tier-1 gear) — SHIPPED
+New tier-1 hands item (`fingerless`, glyph 🧤, costUnit 1.15 → price 1035, the
+priciest tier-1 buyable). Equipped, petting Enzo pays +5 instead of +1, via a
+new `enzoPet` item field and `enzoPetValue(me)` (max over equipped defs, base 1);
+`tryClickEnzo` uses it and the toast shows the real gain. Verified it's the most
+expensive tier-1 item and that a pet pays +5 when worn.
+
 ## 2026-09-17 — Admin debug "Boost" button — SHIPPED
 A HUD button gated to the account username `ianabercrombie` (case-insensitive,
 substring). `cheatBoost()` grants 1s of invincibility (reuses `invulnUntil`) +

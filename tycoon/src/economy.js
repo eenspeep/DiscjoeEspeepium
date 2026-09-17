@@ -441,6 +441,7 @@ export const ITEMS = {
   clipboard: { name: "Clipboard", slot: "hands", tier: 1, value: 0.8, tag: "neutral", shape: "domino", art: "clipboard", glyph: "📋", color: "#c8a06a", costUnit: 0.6 },
   ballcap: { name: "Ball Cap", slot: "head", tier: 1, value: 0.6, tag: "neutral", shape: "domino", art: "ballcap", glyph: "🧢", color: "#2f5fbf", costUnit: 0.6 },
   cargopants: { name: "Cargo Pants", slot: "legs", tier: 1, value: 0.8, tag: "neutral", shape: "domino", art: "cargopants", glyph: "👖", color: "#6b7a52", costUnit: 0.7 },
+  fingerless: { name: "Fingerless Gloves", slot: "hands", tier: 1, enzoPet: 5, shape: "domino", glyph: "🧤", color: "#5a4632", costUnit: 1.15 },   // priciest tier-1: petting Enzo pays +5
   bag_small: { name: "Small Bag", slot: "bag", tier: 1, grid: { w: 2, h: 2 }, shape: "square", art: "bag", glyph: "👝", color: "#8a6a3b", costUnit: 0 },
   // Tier 2
   clownnose: { name: "Clown Nose", slot: "nose", tier: 2, value: 1.0, tag: "neutral", shape: "dot", art: "clownnose", glyph: "🔴", color: "#e5433b", costUnit: 0.8 },
@@ -622,6 +623,12 @@ export function petSoulMult(me) { return petActive(me) ? TUNING.petSoulMult : 1;
 
 function itemValue(def) { return def.value ? def.value * tierPower(def.tier) : 0; }
 
+// Coins a single Enzo pet pays: base 1, raised by the best equipped enzoPet item.
+export function enzoPetValue(me) {
+  let v = 1;
+  for (const def of equippedDefs(me)) if (def.enzoPet) v = Math.max(v, def.enzoPet);
+  return v;
+}
 export function equippedDefs(me) {
   const out = [];
   for (const slot of ITEM_SLOTS) {

@@ -429,6 +429,7 @@ function itemBuffText(def) {
   if (def.buildBonus) return "+" + def.buildBonus + " build";
   if (def.researchBonus) return "+" + def.researchBonus + " rsch";
   if (def.soulBonus) return "+" + Math.round(def.soulBonus * 100) + "% soul";
+  if (def.enzoPet) return "🐱 Enzo pets pay +" + def.enzoPet;
   if (def.grid) return def.grid.w + "×" + def.grid.h + " bag";
   return "";
 }
