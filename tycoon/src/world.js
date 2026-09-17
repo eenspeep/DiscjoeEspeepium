@@ -11,16 +11,18 @@ import {
   attackRangeFor, interactRange, buildRange, sizeMult, withinReach,
   enzoCells, isEnzoTile, enzoAnchor, hasLeash, petActive,
   WALL_DECOR, wallIsReal, gearWorn,
+  isBuyableTile, tileFrontier, tileCost, canBuyTiles,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
 let buildMod = null;    // node-mod type being placed
 let buildDoor = false;  // placing a door
 let buildWall = null;   // wall-decor type being hung
+let buildExpand = false; // buying floor tiles out of the fog
 let buildRot = 0;       // rotation (0..3) for furniture placement
 let enzoClickT = -9;    // last Enzo-click time, for the click pulse
 const ZMIN = 0.5, ZMAX = 2.6;   // in-game zoom range (pinch / wheel / buttons)
@@ -117,14 +119,16 @@ export function initWorld(canvasEl, hooks = {}) {
   requestAnimationFrame(loop);
 }
 
-export function setBuild(type) { buildType = type; buildMod = null; buildDoor = false; buildWall = null; }
+export function setBuild(type) { buildType = type; buildMod = null; buildDoor = false; buildWall = null; buildExpand = false; }
 export function getBuild() { return buildType; }
-export function setBuildMod(type) { buildMod = type; buildType = null; buildDoor = false; buildWall = null; }
+export function setBuildMod(type) { buildMod = type; buildType = null; buildDoor = false; buildWall = null; buildExpand = false; }
 export function getBuildMod() { return buildMod; }
-export function setBuildDoor(on) { buildDoor = on; buildType = null; buildMod = null; buildWall = null; }
+export function setBuildDoor(on) { buildDoor = on; buildType = null; buildMod = null; buildWall = null; buildExpand = false; }
 export function getBuildDoor() { return buildDoor; }
-export function setBuildWall(type) { buildWall = type; buildType = null; buildMod = null; buildDoor = false; }
+export function setBuildWall(type) { buildWall = type; buildType = null; buildMod = null; buildDoor = false; buildExpand = false; }
 export function getBuildWall() { return buildWall; }
+export function setBuildExpand(on) { buildExpand = on; buildType = null; buildMod = null; buildDoor = false; buildWall = null; }
+export function getBuildExpand() { return buildExpand; }
 export function setSelected(key) { selectedKey = key; }
 
 function resize() {
@@ -136,6 +140,11 @@ function resize() {
 function onClick() {
   if (!mouse.over || !state.me.created) return;
   const gx = mouse.gx, gy = mouse.gy;
+  if (buildExpand) {   // buying floor out of the fog
+    const r = tryBuyTile(gx, gy);
+    onTileMessage(r.ok ? ("Floor claimed for " + r.cost + "¢.") : (r.why || "Can't expand there."));
+    return;
+  }
   const fKey = furnitureAnchorAt(state.shared, gx, gy);
   const sKey = siteAnchorAt(state.shared, gx, gy);
   const doorKey = gx + "," + gy;
@@ -446,6 +455,22 @@ function draw(t) {
   }
   for (const [gx, gy] of floorCells) drawBackWalls(s, gx, gy, walk);
 
+  // the fog frontier: the ring of buyable void hugging the office. Always a faint
+  // hint; in Expand mode it lights up, brighter where you can reach to claim it.
+  {
+    const frontier = tileFrontier(s);
+    const R = interactRange(state.me), px = Math.round(state.me.pos.x), py = Math.round(state.me.pos.y);
+    for (const k of frontier) {
+      const [gx, gy] = k.split(",").map(Number);
+      if (buildExpand) {
+        const near = Math.max(Math.abs(gx - px), Math.abs(gy - py)) <= R;
+        drawTile(gx, gy, near ? "rgba(120,205,155,0.30)" : "rgba(95,115,155,0.16)");
+      } else {
+        drawTile(gx, gy, "rgba(80,95,130,0.07)");
+      }
+    }
+  }
+
   // when holding something, shade every tile you can reach so the placement
   // range is obvious (you can only build within interact range)
   if (state.me.created && (buildType || buildMod || buildDoor)) {
@@ -472,6 +497,16 @@ function draw(t) {
     } else if (buildDoor) {
       const ok = reach && inHall(s, mouse.gx, mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !s.furniture[mouse.gx + "," + mouse.gy] && !s.sites[mouse.gx + "," + mouse.gy];
       if (isWalkable(s, mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(90,160,240,0.55)" : "rgba(230,80,70,0.45)");
+    } else if (buildExpand) {
+      const buyable = isBuyableTile(s, mouse.gx, mouse.gy) && canBuyTiles(s), ok = reach && buyable;
+      if (buyable) {
+        drawTile(mouse.gx, mouse.gy, ok ? "rgba(70,200,130,0.6)" : "rgba(230,150,70,0.45)");
+        const p = project(mouse.gx, mouse.gy, canvas), Z = camera.zoom, label = tileCost(s) + "¢";
+        ctx.font = `${11 * Z}px "Fredoka", system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        const wpx = ctx.measureText(label).width + 10 * Z;
+        ctx.fillStyle = "rgba(20,22,28,0.82)"; rrect(ctx, p.x - wpx / 2, p.y - 10 * Z, wpx, 15 * Z, 7 * Z);
+        ctx.fillStyle = ok ? "#8ff0ac" : "#f2c14e"; ctx.fillText(label, p.x, p.y - 2.5 * Z);
+      }
     } else if (isWalkable(s, mouse.gx, mouse.gy)) {
       drawTile(mouse.gx, mouse.gy, "rgba(90,120,220,0.35)");
     }

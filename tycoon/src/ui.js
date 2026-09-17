@@ -13,7 +13,7 @@ import {
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
-  roomCost, canAddRoom, isProtected, statScales, SPECIALTIES, ADJECTIVES, adjSummary, rollAdjectives, RARITY, STATS,
+  roomCost, canAddRoom, tileCost, canBuyTiles, isProtected, statScales, SPECIALTIES, ADJECTIVES, adjSummary, rollAdjectives, RARITY, STATS,
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
   furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
@@ -26,7 +26,7 @@ import {
   petActive,
 } from "./economy.js";
 import { LOOK_PICKERS, lookColor, drawJoey, drawJoeySprite, defaultLook } from "./appearance.js";
-import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setBuildWall, getBuildWall, setSelected, unlockDoorLocal } from "./world.js";
+import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setBuildWall, getBuildWall, setBuildExpand, getBuildExpand, setSelected, unlockDoorLocal } from "./world.js";
 
 let hud, buildbar, panel, toast;
 let openKey = null, openView = null;
@@ -168,6 +168,7 @@ function heldLabel() {
   if (getBuildMod()) { const m = MODS[getBuildMod()]; return m.glyph + " " + m.name; }
   if (getBuildWall()) { const d = WALL_DECOR[getBuildWall()]; return d.glyph + " " + d.name; }
   if (getBuildDoor()) return "🚪 Door";
+  if (getBuildExpand()) return "🧭 Expand floor";
   return null;
 }
 function renderBuildbar() {
@@ -177,7 +178,7 @@ function renderBuildbar() {
   buildbar.classList.add("show");
   buildbar.replaceChildren(
     el("span", { class: "hand-label", text: "Holding: " + label }),
-    el("span", { class: "hand-hint", text: (getBuildWall() ? "aim at a wall within reach" : "click within reach") + (getBuild() ? " · R to rotate" : "") }),
+    el("span", { class: "hand-hint", text: (getBuildExpand() ? "click glowing fog at your edge" : getBuildWall() ? "aim at a wall within reach" : "click within reach") + (getBuild() ? " · R to rotate" : "") }),
     el("button", { class: "btn small", onclick: clearHands }, ["Put away"]),
   );
 }
@@ -196,15 +197,16 @@ function takeFurniture(type) { setBuild(type); flash("Holding " + FURNITURE[type
 function takeMod(type) { setBuildMod(type); flash("Holding " + MODS[type].name + " — click a desk/table surface within reach."); closePanel(); renderBuildbar(); }
 function takeDoor() { setBuildDoor(true); flash("Holding a door — click a hallway tile within reach."); closePanel(); renderBuildbar(); }
 function takeWall(type) { setBuildWall(type); flash("Holding " + WALL_DECOR[type].name + " — aim at a wall within reach and click."); closePanel(); renderBuildbar(); }
+function takeExpand() { setBuildExpand(true); flash("Expand mode — walk to your office edge and click the glowing fog to claim floor."); closePanel(); renderBuildbar(); }
 
 function renderShop() {
   const s = state.shared, me = state.me, kids = [panelHeader("🛒 Shop")];
   kids.push(el("p", { class: "muted small", text: "Pick something to hold, then click a tile within reach to place it. You keep holding it, so you can drop several." }));
 
-  // Expansion: Add Room (instant) + Door (held)
-  kids.push(el("div", { class: "ward-label", text: "Expansion" }));
-  kids.push(canAddRoom(s)
-    ? shopRow("➕", "Add Room", "grow the office down a new hallway", roomCost(s), me.credits >= roomCost(s), () => { const r = tryAddRoom(); flash(r.ok ? "New room added down the hall." : (r.why || "Can't add a room.")); if (r.ok) renderShop(); })
+  // Expansion: claim floor tile-by-tile out of the fog + Door (held)
+  kids.push(el("div", { class: "ward-label", text: "Expansion · claim floor out of the fog" }));
+  kids.push(canBuyTiles(s)
+    ? shopRow("🧭", "Expand Floor", "hold it, then click glowing fog at your edge", tileCost(s), me.credits >= tileCost(s), takeExpand)
     : el("div", { class: "shop-row locked", text: "🏢 Office is at max size" }));
   kids.push(currentTier(s) >= TUNING.doorTier
     ? shopRow("🚪", "Door", "install in a hallway, lock it later", TUNING.doorCost, me.credits >= TUNING.doorCost, takeDoor)
