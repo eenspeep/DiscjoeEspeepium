@@ -4,6 +4,16 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Spawn/unstick spread around center (no more stacking) — SHIPPED
+Getting wedged at spawn was everyone resolving to the SAME tile: `centerMe` used
+a deterministic `freeTileNear(center)`, and the center tile is an Enzo cell, so
+every spawn and every unstick landed on the one free tile next to the statue and
+players piled up. New `spawnSpot()` picks a free tile in a ring AROUND the center
+(never the center itself), randomized, and prefers tiles no other Joey is on, so
+people scatter to the ~5 open tiles around Enzo instead of stacking. Verified:
+40 spawns all within Chebyshev-1 of center, never on center/Enzo, always
+walkable, spread across the free ring.
+
 ## 2026-09-17 — Furniture roles: Gold / Build / Research — SHIPPED
 Replaced the brain/build/neutral tags (which just scaled income off stats) with
 three functional roles, each doing a distinct job:
