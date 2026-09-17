@@ -59,6 +59,7 @@ export const TUNING = {
   researchScale: 0.2,        // RP/sec per adjacent BRAIN-furniture tier
   researchStatBonus: 0.10,
   buildFurnScale: 0.15,      // build-power per adjacent BUILD-furniture (tier-weighted, x2 with the Build specialty)
+  hybridCostMult: 1.6,       // a half-and-half hybrid piece costs this much more to buy + upgrade
   soulScale: 0.15,           // SOUL/sec per unit of adjacent altar "soul" (before gear/kill mult)
   // Cumulative room research needed to reach each tier (index = tier).
   researchTiers: [0, 150, 600, 2000, 6000],

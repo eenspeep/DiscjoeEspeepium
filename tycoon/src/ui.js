@@ -19,7 +19,7 @@ function isAdminUser() {
 }
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
-  roomCost, canAddRoom, tileCost, canBuyTiles, isProtected, roleOf, ROLE_META, goldPctOf, buildAddOf, researchAddOf, specRole, SPECIALTIES, ADJECTIVES, adjByWord, adjSummary, rollAdjectives, RARITY, STATS,
+  roomCost, canAddRoom, tileCost, canBuyTiles, isProtected, roleOf, ROLE_META, roleShareOf, goldPctOf, buildAddOf, researchAddOf, soulPerSec, specRole, SPECIALTIES, ADJECTIVES, adjByWord, adjSummary, rollAdjectives, RARITY, STATS,
   joeLevel, adjectiveSlots, openAdjectiveSlots, nextLevelSoul, POWERS, powerList,
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
@@ -266,12 +266,31 @@ function takeExpand() { setBuildExpand(true); flash("Expand mode — walk to you
 
 // One-line effect string for a furniture piece, in its role's terms. Pass a
 // real `me` for "your" numbers (specialty x2 + stats), or {} for base preview.
+function roleBlurb(role) {
+  return role === "gold" ? "multiplies the gold of anyone standing next to it."
+    : role === "build" ? "speeds up building for anyone next to it."
+    : role === "research" ? "speeds up research for anyone next to it."
+    : role === "soul" ? "channels SOUL for whoever stands and prays at it (no gold)."
+    : role === "hybrid" ? "does half of two jobs at once — that's why it costs more."
+    : "a utility piece.";
+}
 function furnEffect(ty, f, me) {
   const d = FURNITURE[ty], role = roleOf(ty);
-  if (d.ratSpawner) return "🐀 spawns rats";
-  if (role === "gold") return "💰 +" + Math.round(goldPctOf(f, me) * 100) + "% gold";
-  if (role === "build") return "🔧 +" + (Math.round(buildAddOf(f, me) * 100) / 100) + " build";
-  return "🔬 +" + (Math.round(researchAddOf(f, me) * 100) / 100) + " rp/s";
+  if (role === "utility" || d.ratSpawner) return "🐀 spawns rats";
+  if (role === "soul") return "🔮 +" + soulPerSec(f) + " soul/s";
+  const gold = () => "💰 +" + Math.round(goldPctOf(f, me) * 100) + "% gold";
+  const build = () => "🔧 +" + (Math.round(buildAddOf(f, me) * 100) / 100) + " build";
+  const rsch = () => "🔬 +" + (Math.round(researchAddOf(f, me) * 100) / 100) + " rp/s";
+  if (role === "hybrid") {
+    const parts = [];
+    if (roleShareOf(ty, "gold")) parts.push(gold());
+    if (roleShareOf(ty, "build")) parts.push(build());
+    if (roleShareOf(ty, "research")) parts.push(rsch());
+    return "⚗️ " + parts.join(" · ");
+  }
+  if (role === "gold") return gold();
+  if (role === "build") return build();
+  return rsch();
 }
 
 function renderShop() {
@@ -350,7 +369,7 @@ function renderFurniture() {
 
   panel.replaceChildren(
     panelHeader(def.glyph + " " + def.name),
-    el("p", { class: "muted small", text: def.ratSpawner ? "Spawns " + f.level + " rat" + (f.level > 1 ? "s" : "") + " every 10 min. Upgrade for more." : (ROLE_META[role].label + " furniture — " + (role === "gold" ? "multiplies the gold of anyone standing next to it." : role === "build" ? "speeds up building for anyone next to it." : "speeds up research for anyone next to it.")) }),
+    el("p", { class: "muted small", text: def.ratSpawner ? "Spawns " + f.level + " rat" + (f.level > 1 ? "s" : "") + " every 10 min. Upgrade for more." : (ROLE_META[role].label + " furniture — " + roleBlurb(role)) }),
     f.broken ? el("p", { class: "broken-note small", text: "🐀 In disrepair after a rat attack — earns nothing until repaired." }) : null,
     prot ? el("p", { class: "muted small", text: iPaid ? "🛡️ Protected room — anyone can sell this, and the refund comes back to you (you paid for it)." : "🛡️ Protected room — anyone can sell this, and the refund goes back to whoever paid for it." }) : null,
     stat("Level", String(f.level)), stat("Base", furnEffect(f.type, { type: f.type, level: f.level }, {})), stat("For you", furnEffect(f.type, f, state.me)),

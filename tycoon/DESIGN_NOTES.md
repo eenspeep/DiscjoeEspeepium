@@ -4,6 +4,20 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — One resource per furniture (altar = soul only) — SHIPPED
+Furniture was double-dipping: the Esoteric Altar/Obelisk were role `gold` (from
+their `neutral` tag) AND channelled soul, so they paid gold and soul at once.
+Now every piece produces exactly one resource. `roleOf` gained `soul` (any piece
+with `def.soul`), `utility` (rat spawners), and `hybrid` roles; soul pieces no
+longer pay gold (`goldPctOf`/`buildAddOf`/`researchAddOf` go through
+`roleShareOf`, which is 1 for a single-role piece and 0 otherwise). A piece can
+opt into a **hybrid** (`hybrid:true, roles:[...]`) that pays HALF of two roles
+and costs `hybridCostMult` (1.6×) more to buy/upgrade — supported now, no piece
+uses it yet. Furniture tint follows the role (altar = purple), and the shop /
+inspector show the real resource (altar: "🔮 +0.15 soul/s", no gold). Verified
+the altar pays 0 gold + full soul, income ignores it, and gold/build/research
+pieces stay single-role.
+
 ## 2026-09-17 — Research tiers x10 + Charlie hunts protected-room rats — SHIPPED
 - **Research 10x pricier.** `RESEARCH_TIERS` all multiplied by 10 (tier 2 now
   1200, …, tier 10 now 1,500,000). Tiers unlock 10x slower.

@@ -46,8 +46,20 @@ export const ROLE_META = {
   gold: { label: "Gold", glyph: "💰", tint: "#d4a72c" },
   build: { label: "Build", glyph: "🔧", tint: "#c9772f" },
   research: { label: "Research", glyph: "🔬", tint: "#4b56b8" },
+  soul: { label: "Soul", glyph: "🔮", tint: "#7a3fb8" },
+  utility: { label: "Utility", glyph: "🐀", tint: "#7f8794" },
+  hybrid: { label: "Hybrid", glyph: "⚗️", tint: "#3f9e57" },
 };
-export function roleOf(type) { const d = FURNITURE[type]; return d ? (ROLE_OF[d.tag] || "gold") : "gold"; }
+// Every piece produces exactly ONE resource (or is a utility/hybrid). Soul
+// channelers (altars) are their own role and never pay gold; rat spawners are
+// utility. A piece flagged `hybrid` pays half of two roles (its own `roles`).
+export function roleOf(type) {
+  const d = FURNITURE[type]; if (!d) return "gold";
+  if (d.hybrid) return "hybrid";
+  if (d.soul) return "soul";
+  if (d.ratSpawner) return "utility";
+  return ROLE_OF[d.tag] || "gold";
+}
 // Which role a Joey's specialty doubles ("brain" is the old name for research).
 export function specRole(me) {
   const s = me && me.specialty;
@@ -294,13 +306,25 @@ export const FURNITURE_ORDER = Object.keys(FURNITURE).sort((a, b) => FURNITURE[a
 
 export function countOfType(shared, type) { return Object.values(shared.furniture).filter((f) => f.type === type).length; }
 export function furnitureValue(f) { const d = FURNITURE[f.type]; return d.unit * tierPower(d.tier) * (1 + 0.5 * (f.level - 1)); }
-// Role effects of one piece for a given Joey (0 unless it's that role):
+// Every piece produces exactly one resource; a `hybrid` pays HALF of each of its
+// two `roles`. roleShareOf is that fraction (1 for a single-role piece, 0.5 for
+// each of a hybrid's roles, 0 otherwise) — the single knob that keeps a piece
+// from paying two resources at full rate.
+export function roleShareOf(type, role) {
+  const d = FURNITURE[type]; if (!d) return 0;
+  if (d.hybrid && Array.isArray(d.roles)) return d.roles.includes(role) ? 0.5 : 0;
+  return roleOf(type) === role ? 1 : 0;
+}
+// Role effects of one piece for a given Joey (0 unless it produces that role):
 // gold -> a % added to the income multiplier; build -> build power; research -> RP/s.
-export function goldPctOf(f, me) { return roleOf(f.type) === "gold" ? furnitureValue(f) * roleMult(me, "gold") : 0; }
+export function goldPctOf(f, me) { const s = roleShareOf(f.type, "gold"); return s ? furnitureValue(f) * roleMult(me, "gold") * s : 0; }
 function tierTerm(d, f) { return (d.tier + 0.5 * ((f.level || 1) - 1)); }
-export function buildAddOf(f, me) { const d = FURNITURE[f.type]; return roleOf(f.type) === "build" ? TUNING.buildFurnScale * tierTerm(d, f) * roleMult(me, "build") : 0; }
-export function researchAddOf(f, me) { const d = FURNITURE[f.type]; return roleOf(f.type) === "research" ? TUNING.researchScale * tierTerm(d, f) * roleMult(me, "research") : 0; }
-export function furnitureBaseCost(type) { const d = FURNITURE[type]; return d.costUnit * tierCost(d.tier); }
+export function buildAddOf(f, me) { const d = FURNITURE[f.type], s = roleShareOf(f.type, "build"); return s ? TUNING.buildFurnScale * tierTerm(d, f) * roleMult(me, "build") * s : 0; }
+export function researchAddOf(f, me) { const d = FURNITURE[f.type], s = roleShareOf(f.type, "research"); return s ? TUNING.researchScale * tierTerm(d, f) * roleMult(me, "research") * s : 0; }
+// Soul channelled per second by one altar/obelisk (before your personal mult).
+export function soulPerSec(f) { const d = FURNITURE[f.type]; return d && d.soul ? Math.round(d.soul * (1 + 0.5 * ((f.level || 1) - 1)) * TUNING.soulScale * 100) / 100 : 0; }
+// Hybrids (half-and-half) cost more to buy and upgrade.
+export function furnitureBaseCost(type) { const d = FURNITURE[type]; return d.costUnit * tierCost(d.tier) * (d.hybrid ? (TUNING.hybridCostMult || 1.6) : 1); }
 export function furnitureBuyCost(shared, type) { return Math.ceil(furnitureBaseCost(type) * Math.pow(1.15, countOfType(shared, type))); }
 export function upgradeCost(f) { return Math.ceil(furnitureBaseCost(f.type) * 0.5 * Math.pow(1.5, f.level - 1)); }
 // A rat-mauled piece is repaired for half the item + half of every upgrade paid.
