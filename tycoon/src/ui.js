@@ -9,7 +9,7 @@ import {
   tryBuyItem, equipItem, unequipItem, moveItem, rotateItem, trySellItem,
   cancelSite, cancelBuild,
   tryLockDoor, tryUnlockDoor, tryRemoveDoor, checkDoorPassword,
-  tryBuyRatEgg, tryRepairFurniture,
+  tryBuyRatEgg, tryRepairFurniture, trySellWall,
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
@@ -21,11 +21,12 @@ import {
   rpRate, soulRate, tierProgress, esoProgress,
   esoOfItem, esoOfFurniture, currentEso, nextEso, ESO_MAX, ESO_NAME,
   MODS, MOD_ORDER, modPrice, isModUnlocked,
+  WALL_DECOR, WALL_ORDER, wallPrice, isWallUnlocked,
   blackMarkCells, blackMarkSlots, TRAITS, repairCost,
   petActive,
 } from "./economy.js";
 import { LOOK_PICKERS, lookColor, drawJoey, drawJoeySprite, defaultLook } from "./appearance.js";
-import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setSelected, unlockDoorLocal } from "./world.js";
+import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setBuildWall, getBuildWall, setSelected, unlockDoorLocal } from "./world.js";
 
 let hud, buildbar, panel, toast;
 let openKey = null, openView = null;
@@ -60,6 +61,7 @@ export function initUI(authApi) {
     if (state.justMonsterBlock) { flash("🛡️ " + state.justMonsterBlock.by + " broke " + state.justMonsterBlock.n + " of your shields!"); state.justMonsterBlock = null; }
     if (state.justPetGot) { flash("🐀 You leashed a rat buddy! x1.2 soul, and it eats one hit for you."); state.justPetGot = null; }
     if (state.justPetHit) { flash("🐀💥 Your rat buddy took a hit from " + state.justPetHit.by + " and scurried off."); state.justPetHit = null; }
+    if (state.justDodged) { flash("✨ Mid-jump! You dodged " + state.justDodged + "'s hit."); state.justDodged = null; }
     if (state.justKilled) { flash("☠️ Killed by " + state.justKilled + ". Your gear dropped where you fell. Build a new Joey."); state.justKilled = null; closePanel(); ensureCreator(); }
   }, 400);
 }
@@ -119,6 +121,7 @@ function refresh() {
   else if (openView === "pot") renderPot();
   else if (openView === "site") renderSite();
   else if (openView === "door") renderDoor();
+  else if (openView === "wall") renderWall();
   else if (openView === "shop") renderShop();
 }
 
@@ -163,6 +166,7 @@ export function clearHands() { setBuild(null); renderBuildbar(); }
 function heldLabel() {
   if (getBuild()) { const d = FURNITURE[getBuild()]; return d.glyph + " " + d.name; }
   if (getBuildMod()) { const m = MODS[getBuildMod()]; return m.glyph + " " + m.name; }
+  if (getBuildWall()) { const d = WALL_DECOR[getBuildWall()]; return d.glyph + " " + d.name; }
   if (getBuildDoor()) return "🚪 Door";
   return null;
 }
@@ -173,7 +177,7 @@ function renderBuildbar() {
   buildbar.classList.add("show");
   buildbar.replaceChildren(
     el("span", { class: "hand-label", text: "Holding: " + label }),
-    el("span", { class: "hand-hint", text: "click within reach" + (getBuild() ? " · R to rotate" : "") }),
+    el("span", { class: "hand-hint", text: (getBuildWall() ? "aim at a wall within reach" : "click within reach") + (getBuild() ? " · R to rotate" : "") }),
     el("button", { class: "btn small", onclick: clearHands }, ["Put away"]),
   );
 }
@@ -191,6 +195,7 @@ function shopRow(glyph, name, meta, price, afford, onclick, extraClass = "") {
 function takeFurniture(type) { setBuild(type); flash("Holding " + FURNITURE[type].name + " — click a tile within reach. R rotates, Put Away to drop."); closePanel(); renderBuildbar(); }
 function takeMod(type) { setBuildMod(type); flash("Holding " + MODS[type].name + " — click a desk/table surface within reach."); closePanel(); renderBuildbar(); }
 function takeDoor() { setBuildDoor(true); flash("Holding a door — click a hallway tile within reach."); closePanel(); renderBuildbar(); }
+function takeWall(type) { setBuildWall(type); flash("Holding " + WALL_DECOR[type].name + " — aim at a wall within reach and click."); closePanel(); renderBuildbar(); }
 
 function renderShop() {
   const s = state.shared, me = state.me, kids = [panelHeader("🛒 Shop")];
@@ -210,6 +215,13 @@ function renderShop() {
   if (modTypes.length) {
     kids.push(el("div", { class: "ward-label", text: "Node Mods · mount on a desk/table surface" }));
     for (const t of modTypes) { const m = MODS[t], price = modPrice(t); kids.push(shopRow(m.glyph, m.name, "+" + fmt(m.unit * tierPower(m.tier)) + " flat " + m.kind, price, me.credits >= price, () => takeMod(t))); }
+  }
+
+  // Wall decor
+  const wallTypes = WALL_ORDER.filter((t) => isWallUnlocked(t, s));
+  if (wallTypes.length) {
+    kids.push(el("div", { class: "ward-label", text: "Wall Decor · hang on a wall within reach" }));
+    for (const t of wallTypes) { const d = WALL_DECOR[t], price = wallPrice(t); kids.push(shopRow(d.glyph, d.name, "decorative", price, me.credits >= price, () => takeWall(t))); }
   }
 
   // Monsters
@@ -312,6 +324,19 @@ function renderDoor() {
     kids.push(el("label", { class: "field" }, [el("span", { class: "field-label", text: "Password" }), pw]));
     kids.push(el("div", { class: "panel-actions" }, [el("button", { class: "btn primary", onclick: () => { if (checkDoorPassword(openKey, doorPwDraft)) { unlockDoorLocal(openKey); flash("Unlocked! You can pass now."); closePanel(); } else flash("Wrong password."); } }, ["Open"])]));
   }
+  panel.replaceChildren(...kids);
+}
+
+// ---- wall decor inspector -------------------------------------------------
+export function openWall(key, w) { openKey = key; openView = "wall"; setSelected(null); setBuild(null); setBuildMod(null); setBuildDoor(false); setBuildWall(null); renderBuildbar(); renderWall(); showPanel(); }
+function renderWall() {
+  const w = state.shared.walls[openKey]; if (!w) return closePanel();
+  const def = WALL_DECOR[w.type]; if (!def) return closePanel();
+  const kids = [panelHeader(def.glyph + " " + def.name)];
+  kids.push(el("p", { class: "muted small", text: "Wall decoration. Purely cosmetic for now." }));
+  kids.push(el("div", { class: "panel-actions" }, [
+    el("button", { class: "btn", onclick: () => { const r = trySellWall(openKey); flash(!r.ok ? (r.why || "Can't take it down.") : r.toOther ? "Taken down — " + fmt(r.refund) + " returned to its buyer." : "Taken down for " + fmt(r.refund) + "."); if (r.ok) closePanel(); } }, ["Take down"]),
+  ]));
   panel.replaceChildren(...kids);
 }
 

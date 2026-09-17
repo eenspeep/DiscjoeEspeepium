@@ -286,6 +286,31 @@ export const MOD_ORDER = ["plant", "lamp", "toolcaddy", "bonsai", "lavalamp", "p
 export function modFlat(type) { const m = MODS[type]; return m ? m.unit * tierPower(m.tier) : 0; }
 export function modPrice(type) { const m = MODS[type]; return m ? Math.ceil(m.costUnit * tierCost(m.tier)) : 0; }
 export function isModUnlocked(type, shared) { return MODS[type] && MODS[type].tier <= currentTier(shared); }
+
+// ---- wall decor -----------------------------------------------------------
+// Cosmetic pieces that hang on a wall edge (a walkable tile whose neighbor across
+// that side is void). Placed instantly, no build site, no income (yet). Keyed
+// "gx,gy,side" with side "W" (up-left wall) or "N" (up-right wall).
+export const WALL_DECOR = {
+  poster:    { name: "Motivational Poster", glyph: "🖼️", tier: 1, costUnit: 0.5, color: "#c9772f" },
+  clock:     { name: "Wall Clock",          glyph: "🕰️", tier: 1, costUnit: 0.6, color: "#3a3f4b" },
+  dartboard: { name: "Dartboard",           glyph: "🎯", tier: 2, costUnit: 0.7, color: "#b0413e" },
+  sconce:    { name: "Wall Sconce",         glyph: "🕯️", tier: 2, costUnit: 0.7, color: "#c98a2b" },
+  painting:  { name: "Framed Painting",     glyph: "🎨", tier: 3, costUnit: 1.0, color: "#4b56b8" },
+  walltv:    { name: "Wall TV",             glyph: "📺", tier: 4, costUnit: 1.4, color: "#20242e" },
+  neon:      { name: "Neon Sign",           glyph: "🪧", tier: 5, costUnit: 1.6, color: "#b8459b" },
+};
+export const WALL_ORDER = Object.keys(WALL_DECOR).sort((a, b) => WALL_DECOR[a].tier - WALL_DECOR[b].tier);
+export function wallTier(type) { return WALL_DECOR[type] ? WALL_DECOR[type].tier : 1; }
+export function wallPrice(type) { const d = WALL_DECOR[type]; return d ? Math.ceil(d.costUnit * tierCost(d.tier)) : 0; }
+export function isWallUnlocked(type, shared) { return WALL_DECOR[type] && WALL_DECOR[type].tier <= currentTier(shared); }
+// A real wall exists on `side` of a walkable tile when the neighbor across it is void.
+export function wallIsReal(shared, gx, gy, side) {
+  if (!isWalkable(shared, gx, gy)) return false;
+  if (side === "W") return !isWalkable(shared, gx - 1, gy);
+  if (side === "N") return !isWalkable(shared, gx, gy - 1);
+  return false;
+}
 // Sum of a furniture's mounted mods, by kind.
 export function modBonusOf(f) {
   const out = { income: 0, research: 0, build: 0 };

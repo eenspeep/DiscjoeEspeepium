@@ -18,6 +18,7 @@ import {
   equippedWeapon, lowestShield, equippedShields, blackMarkCells,
   buildRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal, withinReach, repairCost,
   hasLeash, petActive,
+  WALL_DECOR, wallPrice, isWallUnlocked, wallIsReal,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -160,7 +161,7 @@ function defaultShared() {
   furniture[`1,1`] = { type: "chair", level: 1, by: [] };
   furniture[`2,1`] = { type: "workbench", level: 1, by: [] };
   furniture[`1,2`] = { type: "snacktable", level: 1, by: [] };
-  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now() }, research: { contrib: {} }, pot: defaultPot() };
+  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, walls: {}, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now() }, research: { contrib: {} }, pot: defaultPot() };
 }
 function healShared(s) {
   if (!s.rooms) { const w = (s.floor && s.floor.w) || 9, h = (s.floor && s.floor.h) || 9; s.rooms = [{ x: 0, y: 0, w, h }]; }
@@ -169,6 +170,7 @@ function healShared(s) {
   if (!s.halls) s.halls = [];
   if (!s.doors) s.doors = {};
   if (!s.furniture) s.furniture = {};
+  if (!s.walls) s.walls = {};
   if (!s.sites) s.sites = {};
   if (!s.loot) s.loot = {};
   if (!s.owed) s.owed = {};
@@ -365,6 +367,34 @@ export function tryPlaceFurniture(type, gx, gy, rot = 0) {
   return { ok: true, building: true };
 }
 
+// Hang a decor piece on a wall edge (gx,gy,side). Instant, no build site.
+export function tryPlaceWall(type, gx, gy, side) {
+  const s = state.shared; s.walls = s.walls || {};
+  if (!WALL_DECOR[type]) return { ok: false, why: "Unknown decor." };
+  if (!isWallUnlocked(type, s)) return { ok: false, why: "That tier isn't researched yet." };
+  if (!wallIsReal(s, gx, gy, side)) return { ok: false, why: "No wall to hang it on." };
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand closer to the wall." };
+  const key = gx + "," + gy + "," + side;
+  if (s.walls[key]) return { ok: false, why: "Something's already on that wall." };
+  const cost = Math.ceil(wallPrice(type) * (1 - discountFrac(state.me)));
+  if (state.me.credits < cost) return { ok: false, why: "Not enough credits." };
+  spend(cost);
+  s.walls[key] = { type, paidBy: state.me.id, paid: cost };
+  commit();
+  return { ok: true };
+}
+export function trySellWall(key) {
+  const s = state.shared, w = s.walls && s.walls[key]; if (!w) return { ok: false };
+  const [gx, gy] = key.split(",").map(Number), prot = isProtected(s, gx, gy);
+  if (!prot && w.paidBy && w.paidBy !== state.me.id) return { ok: false, why: "Only the buyer can take this down." };
+  const mine = !w.paidBy || w.paidBy === state.me.id;
+  const refund = Math.ceil(wallPrice(w.type) * (mine ? refundFrac(state.me) : 0.4));
+  delete s.walls[key];
+  const toOther = payRefund(w.paidBy, refund);
+  commit();
+  return { ok: true, refund, toOther };
+}
+
 export function tryPlaceMod(modType, gx, gy) {
   const s = state.shared, fKey = furnitureAnchorAt(s, gx, gy);
   if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand closer." };
@@ -516,6 +546,10 @@ function dropAllItems(me, key) {
 export function receiveAttack(fromName) {
   const me = state.me;
   if (!me.created) return { ignore: true };
+  if (isInvulnerable()) {                 // mid-jump: the hit whiffs entirely
+    state.justDodged = fromName || "someone"; notify();
+    return { blocked: true, dodged: true };
+  }
   if (petActive(me)) {                    // your rat buddy jumps in front and dies for you
     me.pet = null;
     state.meDirty = true; saveMe(); notify();
@@ -595,6 +629,26 @@ export function tryPickup(gx, gy) {
   state.meDirty = true; commit();
   return { ok: taken.length > 0, taken: taken.length, left: left.length };
 }
+
+// ---- jump + brief invulnerability -----------------------------------------
+// A jump always hops (cosmetic). If the guard is off cooldown it also grants 1s
+// of kill-immunity, then a 60s cooldown. State is ephemeral (not saved), so a
+// reload clears it. Immunity is checked on the victim's own client, same trust
+// model as the rest of combat.
+export function tryJump() {
+  const me = state.me; if (!me || !me.created) return { ok: false };
+  const t = now();
+  state.jumpAt = t;                       // world reads this for the hop arc
+  if (t >= (state.jumpCdUntil || 0)) {
+    state.invulnUntil = t + TUNING.jumpInvulnMs;
+    state.jumpCdUntil = t + TUNING.jumpCooldownMs;
+    notify();
+    return { ok: true, invuln: true };
+  }
+  return { ok: true, invuln: false, cdLeft: Math.ceil(((state.jumpCdUntil || 0) - t) / 1000) };
+}
+export function isInvulnerable() { return now() < (state.invulnUntil || 0); }
+export function jumpCdLeft() { return Math.max(0, Math.ceil(((state.jumpCdUntil || 0) - now()) / 1000)); }
 
 // ---- Garlic Charlie -------------------------------------------------------
 
@@ -757,6 +811,7 @@ export function recruitRat(id) {
 // or die if you don't have that many.
 export function receiveMonsterHit(king) {
   const me = state.me; if (!me || !me.created) return;
+  if (isInvulnerable()) { state.justDodged = king ? "The Rat King" : "a rat"; notify(); return; }
   if (petActive(me)) {                    // the rat buddy takes the hit and is gone
     me.pet = null;
     state.justPetHit = { by: king ? "The Rat King" : "a rat" };

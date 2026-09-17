@@ -87,6 +87,12 @@ export const TUNING = {
   kingGuard: 5,                         // hits to kill the Rat King
   kingCoinMin: 800, kingCoinMax: 6000,  // coins the Rat King drops
   petSoulMult: 1.2,                     // a rat buddy multiplies your soul channeling
+
+  // Jump: cosmetic hop that grants a brief window of kill-immunity, then a cooldown
+  jumpInvulnMs: 1000,                   // you can't be killed for this long after a jump
+  jumpCooldownMs: 60 * 1000,           // the immunity only triggers once per this window
+  jumpArcMs: 520,                      // how long the hop animation lasts
+  jumpArcPx: 18,                       // peak hop height in design px
 };
 
 export const CHARLIE_ID = "garlic-charlie";
