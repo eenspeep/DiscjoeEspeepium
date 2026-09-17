@@ -1,6 +1,8 @@
 // Cloud adapter: a genuinely shared workplace across people and devices, on
-// Supabase Realtime (presence for avatars) + a `rooms` table (the shared build
-// and credits). Turns on automatically when config.js has url + anonKey.
+// Supabase Realtime broadcast (heartbeats carry avatars; ops + full-state carry
+// the office) + a `rooms` table (persistence for fresh joins/reloads). Turns on
+// automatically when config.js has url + anonKey. Presence is deliberately not
+// used — see emitPeers for why.
 //
 // NOTE: this path needs a live Supabase project to exercise. The SQL to create
 // the table and its Row Level Security policy is in tycoon/supabase/schema.sql,
@@ -17,25 +19,33 @@ export function makeSupabaseNet(myId, room) {
   let peersCb = () => {};
   let msgCb = () => {};
   let myPresence = null;
-  let lastPresenceSent = 0;
   let lastHb = 0;
   let pushTimer = null, pendingShared = null, lastPush = 0;
   const hbPeers = new Map();   // id -> { meta, t } from broadcast heartbeats
-  const PEER_TTL = 6000;
-  const stats = { sub: "-", out: 0, hbIn: 0, opIn: 0, sharedIn: 0, lastSharedT: 0, peers: 0 };
+  const PEER_TTL = 8000;
+  const stats = { sub: "-", out: 0, sendErr: 0, hbIn: 0, opIn: 0, sharedIn: 0, lastSharedT: 0, peers: 0 };
 
   const DBG = typeof location !== "undefined" && /joenet|debug/i.test(location.search + location.hash);
   function log(...a) { if (DBG) console.info("[joenet]", ...a); }
 
-  // Peers come from two sources unioned: Supabase presence (when it works) and
-  // our own broadcast heartbeats (which work whenever plain messages do). Either
-  // one alone is enough to see other players.
+  // One place every outbound broadcast goes through, so a throwing/failed send is
+  // counted (visible in ?joenet) instead of silently killing the channel.
+  function sendMsg(payload) {
+    if (!channel) return;
+    try {
+      const r = channel.send({ type: "broadcast", event: "msg", payload });
+      if (r && typeof r.then === "function") r.then((res) => { if (res && res !== "ok") stats.sendErr++; }).catch(() => { stats.sendErr++; });
+      stats.out++;
+    } catch (e) { stats.sendErr++; log("send failed:", e && e.message); }
+  }
+
+  // Peers come purely from our own broadcast heartbeats. We deliberately DO NOT
+  // use Supabase presence: with the newer publishable key it can throw after join
+  // and poison the channel so broadcasts stop routing (movement freezes, peers
+  // vanish). Broadcast heartbeats work whenever any message does, which is all we
+  // need — each carries the sender's position + look.
   function emitPeers() {
     const map = new Map();
-    try {   // presence can throw/return junk with some keys — must not kill heartbeat peers
-      const st = channel && channel.presenceState();
-      if (st) for (const metas of Object.values(st)) for (const m of (metas || [])) if (m && m.id && m.id !== myId) map.set(m.id, m);
-    } catch (e) { /* fall back to heartbeat peers below */ }
     const cutoff = now() - PEER_TTL;
     for (const [id, e] of hbPeers) { if (e.t < cutoff) hbPeers.delete(id); else if (id !== myId) map.set(id, e.meta); }
     const arr = [...map.values()];
@@ -43,14 +53,14 @@ export function makeSupabaseNet(myId, room) {
     peersCb(arr);
   }
   function sendHeartbeat() {
-    if (channel && myPresence) { channel.send({ type: "broadcast", event: "msg", payload: { type: "__hb", id: myId, meta: myPresence } }); stats.out++; }
+    if (myPresence) sendMsg({ type: "__hb", id: myId, meta: myPresence });
   }
   function flushPush() {
     if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
     lastPush = now();
     const s = pendingShared; pendingShared = null; if (!s || !client) return;
     // live sync over broadcast (works without the rooms Postgres-changes feed)
-    if (channel) { channel.send({ type: "broadcast", event: "msg", payload: { type: "__shared", from: myId, state: s } }); stats.out++; }
+    sendMsg({ type: "__shared", from: myId, state: s });
     // and persist to the table so a fresh join / reload can load the latest
     client.from("rooms").upsert({ id: room, state: s, updated_at: new Date().toISOString() })
       .then(({ error }) => { if (error) console.warn("[deskovania] room save:", error.message); });
@@ -63,14 +73,12 @@ export function makeSupabaseNet(myId, room) {
 
     async connect() {
       client = await getSupabase();
+      // No presence: broadcast-only channel. self:false so we don't echo our own.
       channel = client.channel(`room:${room}`, {
-        config: { presence: { key: myId } },
+        config: { broadcast: { self: false, ack: false } },
       });
 
       channel
-        .on("presence", { event: "sync" }, emitPeers)
-        .on("presence", { event: "join" }, emitPeers)
-        .on("presence", { event: "leave" }, emitPeers)
         .on(
           "postgres_changes",
           { event: "*", schema: "public", table: "rooms", filter: `id=eq.${room}` },
@@ -98,7 +106,7 @@ export function makeSupabaseNet(myId, room) {
           stats.sub = status;
           log("subscribe status:", status, err ? ("err: " + (err.message || err)) : "");
           if (status === "SUBSCRIBED") {
-            if (myPresence) { channel.track(myPresence); sendHeartbeat(); }
+            if (myPresence) sendHeartbeat();
             resolve();
           } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT" || status === "CLOSED") {
             reject(err || new Error(status));
@@ -106,7 +114,7 @@ export function makeSupabaseNet(myId, room) {
         });
       });
       setInterval(emitPeers, 2000);   // prune stale heartbeat peers
-      if (typeof window !== "undefined") window.__joenet = { channel: () => channel, presence: () => channel && channel.presenceState(), hb: () => [...hbPeers.keys()], stats, myId };
+      if (typeof window !== "undefined") window.__joenet = { channel: () => channel, hb: () => [...hbPeers.keys()], stats, myId };
     },
 
     async getInitialShared() {
@@ -140,9 +148,6 @@ export function makeSupabaseNet(myId, room) {
         if (lastHb === 0) log("first heartbeat for", myId.slice(0, 6));
         lastHb = t; sendHeartbeat();
       }
-      // slower: track full presence for the roster (heavier, and can throw with
-      // some keys — heartbeats above are what actually carry peers)
-      if (channel && t - lastPresenceSent > 1000) { lastPresenceSent = t; try { channel.track(myPresence); } catch (e) {} }
     },
 
     onPeers(cb) { peersCb = cb; },
