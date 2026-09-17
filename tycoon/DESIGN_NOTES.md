@@ -4,6 +4,31 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Cosmetics seat on the sprite (hats no longer float) — SHIPPED
+Equipped gear floated well above the pixel sprite because the sprite overlay
+reused the procedural Joey's gear coordinates through two rough constants
+(`GEAR_SCALE`/`GEAR_FEET`) that did not match the sprite's anatomy. Rebuilt the
+anchoring in `appearance.js`.
+- **Anatomy-anchored gear.** `spriteGearXf` maps the procedural gear frame
+  (head-center `P_HEAD`, feet `P_FEET`) onto the sprite's real head and feet,
+  read as fractions of the drawn sprite box (`SPR_HEAD`, `SPR_FEET`). Head gear
+  gets an extra `SPR_HEADFIT` bump because the placeholder sprite's head is
+  oversized. All four numbers are tunable in one place if `joey.png` is redrawn.
+  Gear is drawn in two passes (body+face off the base transform, head enlarged),
+  and everything tracks the walk-squash because the anchors read the live `dh`.
+- **Fixed two sprite-path gaps.** The overlay never drew **legs or feet gear**
+  (boots, sneakers, cargo pants, tool belt were invisible in-world) — added
+  `drawFeet`/`drawLegs` and wired them into both paths.
+- **Coverage.** Added vector art for the four head items that had none (Crown,
+  Candle Hat, Neural Lace, Hivemind Headset) and gave those items an `art` field
+  so it's used. Added a universal emoji-glyph fallback (`paintGlyphFallback`):
+  any equipped item whose art has no hand-drawn case paints its glyph at the
+  right body anchor, so no cosmetic is ever invisible. `wornArt`/`gearWorn` now
+  carry `glyph`+`slot` for that.
+- Verified with a preview grid of every head/eyes/nose/hands/legs/feet/torso
+  item on the sprite path (hats seat on the head, static and mid-walk) and an
+  in-world screenshot with gear equipped.
+
 ## 2026-09-17 — Secured (warded) tiles — SHIPPED
 Pay to "secure" a void frontier tile so nobody can buy it. Ring a locked room
 with wards and it can't be tunnelled into by expansion.

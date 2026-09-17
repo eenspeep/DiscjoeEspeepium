@@ -51,7 +51,8 @@ export function drawJoey(ctx, cx, cy, { look, worn = {}, scale = 1, walking = fa
   // legs + feet
   ctx.fillStyle = "#3a3f4b";
   rrect(ctx, -6 * S, 0, 4.5 * S, 10 * S, 2 * S); rrect(ctx, 1.5 * S, 0, 4.5 * S, 10 * S, 2 * S);
-  if (worn.feet) { ctx.fillStyle = worn.feet.color || "#5b4326"; rrect(ctx, -6.5 * S, 8 * S, 5.5 * S, 4 * S, 1.5 * S); rrect(ctx, 1 * S, 8 * S, 5.5 * S, 4 * S, 1.5 * S); }
+  if (worn.legs) drawLegs(ctx, worn.legs, S);
+  if (worn.feet) drawFeet(ctx, worn.feet, S);
 
   // torso
   ctx.fillStyle = shirt; rrect(ctx, -8 * S, -14 * S, 16 * S, 18 * S, 5 * S);
@@ -116,10 +117,37 @@ function paintTorsoGear(ctx, worn, S, shirt) {
     ctx.beginPath(); ctx.moveTo(9.5 * S, -2 * S); ctx.lineTo(13 * S, -10 * S); ctx.stroke();
   }
 }
-function paintFaceGear(ctx, worn, S) {
-  if (worn.nose) drawNose(ctx, worn.nose, S);
-  if (worn.eyes) drawEyes(ctx, worn.eyes, S);
-  if (worn.head) drawHead(ctx, worn.head, S);
+// Seat gear on the pixel sprite. The gear art is authored in the procedural
+// Joey's frame (head-center at P_HEAD, feet at P_FEET). We map that frame onto
+// the sprite's real head + feet, read as fractions of the drawn sprite box, so
+// hats land ON the head instead of floating above it. Retune SPR_* if joey.png
+// is ever redrawn with different proportions.
+const P_HEAD = -21, P_FEET = 10;
+const SPR_HEAD = 0.35, SPR_FEET = 0.72, SPR_HEADFIT = 1.18;
+function spriteGearXf(ctx, cx, boxTop, dh, extra) {
+  const headY = boxTop + SPR_HEAD * dh, feetY = boxTop + SPR_FEET * dh;
+  const s = (feetY - headY) / (P_FEET - P_HEAD) * (extra || 1);
+  ctx.translate(cx, headY); ctx.scale(s, s); ctx.translate(0, -P_HEAD);
+}
+// Which slot arts already have a hand-drawn vector; anything else falls back to
+// its emoji glyph so no equipped cosmetic is ever invisible on the character.
+const COVERED = {
+  head: new Set(["ballcap", "thinkcap", "hardhat", "partyhat", "crown", "candlehat", "neurallace", "hivemind", "shield"]),
+  eyes: new Set(["shades", "smart", "goggles", "shield"]),
+  nose: new Set(["clownnose", "nosering", "shield"]),
+  hands: new Set(["mug", "wrench", "calc", "clipboard", "weapon", "leash", "shield"]),
+};
+function glyphAt(ctx, g, x, y, px) {
+  if (!g || !g.glyph) return;
+  ctx.save(); ctx.font = `${px}px "Apple Color Emoji", "Noto Color Emoji", system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(g.glyph, x, y); ctx.restore();
+}
+function paintGlyphFallback(ctx, cx, boxTop, dh, dw, worn) {
+  const need = (slot) => { const g = worn[slot]; return g && !(COVERED[slot] && COVERED[slot].has(g.art)); };
+  if (need("head")) glyphAt(ctx, worn.head, cx, boxTop + 0.15 * dh, 0.17 * dh);
+  if (need("eyes")) glyphAt(ctx, worn.eyes, cx, boxTop + 0.30 * dh, 0.12 * dh);
+  if (need("nose")) glyphAt(ctx, worn.nose, cx, boxTop + 0.39 * dh, 0.11 * dh);
+  if (need("hands")) glyphAt(ctx, worn.hands, cx + 0.17 * dw, boxTop + 0.52 * dh, 0.14 * dh);
 }
 
 // ---- optional pixel sprites -----------------------------------------------
@@ -173,9 +201,6 @@ function nameTag(ctx, cx, topY, name, S) {
   ctx.fillStyle = "#eef1f5"; ctx.fillText(name, cx, ny); ctx.restore();
 }
 // Returns true if it painted a sprite; false means "fall back to procedural".
-// Gear frame over the sprite. The sprite is 46·scale tall with feet at footY;
-// these map the procedural gear coords (feet +10·S, head −21·S) onto it. Tunable.
-const GEAR_SCALE = 1.16, GEAR_FEET = 11;
 export function drawJoeySprite(ctx, cx, cy, { look, worn = {}, scale = 1, walking = false, t = 0, name = "", using = false, lift = 0 } = {}) {
   const cv = recoloredJoey(lookColor(look, "stache"), lookColor(look, "shirt"));
   if (!cv) return false;
@@ -192,12 +217,17 @@ export function drawJoeySprite(ctx, cx, cy, { look, worn = {}, scale = 1, walkin
   ctx.restore();
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(cv, cx - dw / 2, footY - dh - lift, dw, dh);
-  // layer equipped gear on top of the sprite body
-  const Sg = scale * GEAR_SCALE, oy = footY - GEAR_FEET * Sg - lift;
-  ctx.save(); ctx.translate(cx, oy);
-  paintTorsoGear(ctx, worn, Sg, lookColor(look, "shirt"));
-  paintFaceGear(ctx, worn, Sg);
+  // layer equipped gear, each region seated on the sprite's real anatomy
+  const boxTop = footY - dh - lift, shirt = lookColor(look, "shirt");
+  ctx.save(); spriteGearXf(ctx, cx, boxTop, dh, 1);   // body + face seat off head+feet
+  paintTorsoGear(ctx, worn, 1, shirt);
+  if (worn.legs) drawLegs(ctx, worn.legs, 1);
+  if (worn.feet) drawFeet(ctx, worn.feet, 1);
+  if (worn.nose) drawNose(ctx, worn.nose, 1);
+  if (worn.eyes) drawEyes(ctx, worn.eyes, 1);
   ctx.restore();
+  if (worn.head) { ctx.save(); spriteGearXf(ctx, cx, boxTop, dh, SPR_HEADFIT); ctx.translate(0, 2); drawHead(ctx, worn.head, 1); ctx.restore(); }
+  paintGlyphFallback(ctx, cx, boxTop, dh, dw, worn);
   if (name) nameTag(ctx, cx, footY - dh, name, scale);
   return true;
 }
@@ -209,7 +239,35 @@ function drawHead(ctx, g, S) {
     case "thinkcap": ctx.fillStyle = shade(c, -18); ctx.beginPath(); ctx.arc(0, -28 * S, 6 * S, Math.PI, 0); ctx.fill(); ctx.fillStyle = c; ctx.fillRect(-10 * S, -30 * S, 20 * S, 3 * S); ctx.fillStyle = "#f2b134"; ctx.beginPath(); ctx.arc(6 * S, -29 * S, 1.4 * S, 0, 7); ctx.fill(); break;
     case "hardhat": ctx.beginPath(); ctx.arc(0, -27 * S, 8.6 * S, Math.PI, 0); ctx.fill(); ctx.fillRect(-10 * S, -27.4 * S, 20 * S, 2.6 * S); ctx.fillStyle = shade(c, -14); ctx.fillRect(-2 * S, -34 * S, 4 * S, 7 * S); break;
     case "partyhat": ctx.beginPath(); ctx.moveTo(0, -40 * S); ctx.lineTo(-6 * S, -27 * S); ctx.lineTo(6 * S, -27 * S); ctx.closePath(); ctx.fill(); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(0, -40 * S, 2 * S, 0, 7); ctx.fill(); break;
+    case "crown":
+      ctx.beginPath(); ctx.moveTo(-8 * S, -25 * S); ctx.lineTo(-8 * S, -30 * S); ctx.lineTo(-4 * S, -27 * S); ctx.lineTo(0, -33 * S); ctx.lineTo(4 * S, -27 * S); ctx.lineTo(8 * S, -30 * S); ctx.lineTo(8 * S, -25 * S); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = shade(c, -18); ctx.fillRect(-8 * S, -26 * S, 16 * S, 1.6 * S);
+      ctx.fillStyle = "#e5433b"; ctx.beginPath(); ctx.arc(0, -26.5 * S, 1.1 * S, 0, 7); ctx.fill(); break;
+    case "candlehat":
+      ctx.fillStyle = c; rrect(ctx, -8 * S, -28 * S, 16 * S, 3.4 * S, 1 * S);
+      ctx.fillStyle = "#f2ead2"; ctx.fillRect(-1.4 * S, -35 * S, 2.8 * S, 7 * S);
+      ctx.fillStyle = "#f2b134"; ctx.beginPath(); ctx.moveTo(0, -39.5 * S); ctx.quadraticCurveTo(-1.8 * S, -36 * S, 0, -34.8 * S); ctx.quadraticCurveTo(1.8 * S, -36 * S, 0, -39.5 * S); ctx.fill();
+      ctx.fillStyle = "#fff6d8"; ctx.beginPath(); ctx.arc(0, -36.4 * S, 0.7 * S, 0, 7); ctx.fill(); break;
+    case "neurallace":
+      ctx.strokeStyle = c; ctx.lineWidth = 1.1 * S; ctx.beginPath(); ctx.arc(0, -24.5 * S, 8.2 * S, Math.PI * 1.04, Math.PI * 1.96); ctx.stroke();
+      ctx.fillStyle = c; for (const a of [1.1, 1.35, 1.65, 1.9]) { ctx.beginPath(); ctx.arc(Math.cos(Math.PI * a) * 8.2 * S, -24.5 * S + Math.sin(Math.PI * a) * 8.2 * S, 1.1 * S, 0, 7); ctx.fill(); } break;
+    case "hivemind":
+      ctx.fillStyle = c; rrect(ctx, -9 * S, -28.5 * S, 18 * S, 2.6 * S, 1 * S);
+      ctx.fillStyle = shade(c, -16); ctx.beginPath(); ctx.arc(-9 * S, -22 * S, 2.3 * S, 0, 7); ctx.fill(); ctx.fillRect(-10.3 * S, -27 * S, 2.6 * S, 5 * S);
+      ctx.strokeStyle = c; ctx.lineWidth = 1.3 * S; ctx.lineCap = "round"; ctx.beginPath(); ctx.moveTo(7 * S, -28 * S); ctx.lineTo(10.5 * S, -34 * S); ctx.stroke();
+      ctx.fillStyle = "#f2b134"; ctx.beginPath(); ctx.arc(10.5 * S, -34.5 * S, 1.4 * S, 0, 7); ctx.fill(); break;
   }
+}
+function drawFeet(ctx, g, S) {
+  ctx.fillStyle = g.color || "#5b4326";
+  rrect(ctx, -6.5 * S, 8 * S, 5.5 * S, 4 * S, 1.5 * S); rrect(ctx, 1 * S, 8 * S, 5.5 * S, 4 * S, 1.5 * S);
+}
+function drawLegs(ctx, g, S) {
+  // trousers overlay on the base legs (cargo pants, tool belt, etc.)
+  const c = g.color || "#5c5f45"; ctx.fillStyle = c;
+  rrect(ctx, -6.5 * S, 0, 5 * S, 8 * S, 2 * S); rrect(ctx, 1.5 * S, 0, 5 * S, 8 * S, 2 * S);
+  if (g.art === "toolbelt") { ctx.fillStyle = shade(c, -22); ctx.fillRect(-7 * S, -0.5 * S, 14 * S, 2.4 * S); ctx.fillStyle = "#d8b24a"; ctx.fillRect(-1.5 * S, -0.5 * S, 3 * S, 2.4 * S); }
+  else { ctx.fillStyle = shade(c, -18); ctx.fillRect(-6 * S, 3 * S, 2.4 * S, 3 * S); ctx.fillRect(3.6 * S, 3 * S, 2.4 * S, 3 * S); }   // cargo pockets
 }
 function drawEyes(ctx, g, S) {
   const c = g.color || "#222";
