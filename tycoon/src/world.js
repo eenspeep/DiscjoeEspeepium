@@ -11,11 +11,11 @@ import {
   attackRangeFor, interactRange, buildRange, sizeMult, withinReach,
   enzoCells, isEnzoTile, enzoAnchor, hasLeash, petActive,
   WALL_DECOR, wallIsReal, gearWorn, hasPower, powerList, isProtected, roleOf, ROLE_META,
-  isBuyableTile, tileFrontier, tileCost, canBuyTiles,
+  isBuyableTile, tileFrontier, tileCost, canBuyTiles, isWarded, isWardableTile,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick, tryTeleport, charlieEatRat, trySellFurniture, tryLiftFurniture, tryDropFurniture, sellRefundWho, CONV_DIR, tryPlaceConvey, tryRemoveConvey, tryPlaceTrap, tryUpgradeTrap, tryRemoveTrap, springTrapOnMe } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick, tryTeleport, charlieEatRat, trySellFurniture, tryLiftFurniture, tryDropFurniture, sellRefundWho, CONV_DIR, tryPlaceConvey, tryRemoveConvey, tryPlaceTrap, tryUpgradeTrap, tryRemoveTrap, springTrapOnMe, tryPlaceWard, tryRemoveWard } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
@@ -23,6 +23,7 @@ let buildMod = null;    // node-mod type being placed
 let buildDoor = false;  // placing a door
 let buildWall = null;   // wall-decor type being hung
 let buildExpand = false; // buying floor tiles out of the fog
+let buildWard = false;   // securing void tiles so they can't be bought
 let buildConvey = false, buildConveyDir = 0;   // placing/aiming a conveyor belt
 let buildTrap = false;   // placing a trap
 let buildRot = 0;       // rotation (0..3) for furniture placement
@@ -153,7 +154,7 @@ export function initWorld(canvasEl, hooks = {}) {
 
 // If you're carrying a picked-up piece and grab a different tool, set it back down.
 function dropCarriedBack() { if (movingFurn) { const [ox, oy] = movingFurn.origKey.split(",").map(Number); tryDropFurniture(ox, oy, movingFurn.f.rot || 0, movingFurn.f); movingFurn = null; } }
-function clearHolds() { dropCarriedBack(); buildType = null; buildMod = null; buildDoor = false; buildWall = null; buildExpand = false; buildConvey = false; buildTrap = false; }
+function clearHolds() { dropCarriedBack(); buildType = null; buildMod = null; buildDoor = false; buildWall = null; buildExpand = false; buildWard = false; buildConvey = false; buildTrap = false; }
 export function setBuild(type) { clearHolds(); buildType = type; }
 export function getBuild() { return buildType; }
 export function setBuildMod(type) { clearHolds(); buildMod = type; }
@@ -168,6 +169,8 @@ export function setBuildTrap(on) { clearHolds(); buildTrap = on; }
 export function getBuildTrap() { return buildTrap; }
 export function setBuildExpand(on) { clearHolds(); buildExpand = on; }
 export function getBuildExpand() { return buildExpand; }
+export function setBuildWard(on) { clearHolds(); buildWard = on; }
+export function getBuildWard() { return buildWard; }
 export function setSelected(key) { selectedKey = key; }
 
 function resize() {
@@ -188,6 +191,11 @@ function onClick() {
   if (buildExpand) {   // buying floor out of the fog
     const r = tryBuyTile(gx, gy);
     onTileMessage(r.ok ? ("Floor claimed for " + r.cost + "¢.") : (r.why || "Can't expand there."));
+    return;
+  }
+  if (buildWard) {   // securing a void tile against expansion
+    const r = tryPlaceWard(gx, gy);
+    onTileMessage(r.ok ? ("Tile secured for " + r.cost + "¢ — no one can buy it now.") : (r.why || "Can't secure there."));
     return;
   }
   if (buildConvey) {
@@ -285,6 +293,9 @@ function contextActions(gx, gy) {
     const tr = s.traps[okey];
     out.push({ label: "⬆️ Upgrade trap (+" + 2 + " uses)", run: () => { const r = tryUpgradeTrap(okey); onTileMessage(r.ok ? "Trap upgraded to " + r.max + " uses." : (r.why || "")); } });
     out.push({ label: "🗑️ Remove trap", run: () => { const r = tryRemoveTrap(okey); onTileMessage(r.ok ? "Trap removed (+" + Math.round(r.refund) + "¢)." : (r.why || "")); } });
+  }
+  if (s.wards && s.wards[okey] && s.wards[okey].by === state.me.id) {
+    out.push({ label: "🔓 Release secured tile (+" + Math.round(TUNING.wardCost * TUNING.wardRefund) + "¢)", run: () => { const r = tryRemoveWard(okey); onTileMessage(r.ok ? "Tile released (+" + Math.round(r.refund) + "¢)." : (r.why || "")); } });
   }
   const sKey = siteAnchorAt(s, gx, gy);
   if (!fKey && sKey) out.push({ label: "🔨 Open build site", run: () => onSiteClick(sKey, s.sites[sKey]) });
@@ -615,6 +626,7 @@ function draw(t) {
   for (const [gx, gy] of floorCells) drawBackWalls(s, gx, gy, walk);
   for (const [k, d] of Object.entries(s.convey || {})) { const [gx, gy] = k.split(",").map(Number); drawConvey(gx, gy, d); }
   for (const [k, tr] of Object.entries(s.traps || {})) { const [gx, gy] = k.split(",").map(Number); drawTrap(gx, gy, tr); }
+  for (const k of Object.keys(s.wards || {})) { const [gx, gy] = k.split(",").map(Number); drawWard(gx, gy); }
 
   // the fog frontier: the ring of buyable void hugging the office. Always a faint
   // hint; in Expand mode it lights up, brighter where you can reach to claim it.
@@ -623,7 +635,11 @@ function draw(t) {
     const R = interactRange(state.me), px = Math.round(state.me.pos.x), py = Math.round(state.me.pos.y);
     for (const k of frontier) {
       const [gx, gy] = k.split(",").map(Number);
-      if (buildExpand) {
+      if (isWarded(s, gx, gy)) continue;   // secured tiles draw as wards, not fog
+      if (buildWard) {
+        const near = Math.max(Math.abs(gx - px), Math.abs(gy - py)) <= R;
+        drawTile(gx, gy, near ? "rgba(210,170,90,0.28)" : "rgba(95,115,155,0.16)");
+      } else if (buildExpand) {
         const near = Math.max(Math.abs(gx - px), Math.abs(gy - py)) <= R;
         drawTile(gx, gy, near ? "rgba(120,205,155,0.30)" : "rgba(95,115,155,0.16)");
       } else {
@@ -673,6 +689,17 @@ function draw(t) {
         const wpx = ctx.measureText(label).width + 10 * Z;
         ctx.fillStyle = "rgba(20,22,28,0.82)"; rrect(ctx, p.x - wpx / 2, p.y - 10 * Z, wpx, 15 * Z, 7 * Z);
         ctx.fillStyle = ok ? "#8ff0ac" : "#f2c14e"; ctx.fillText(label, p.x, p.y - 2.5 * Z);
+      }
+    } else if (buildWard) {
+      const wardable = isWardableTile(s, mouse.gx, mouse.gy), ok = reach && wardable;
+      if (wardable) {
+        drawTile(mouse.gx, mouse.gy, ok ? "rgba(225,180,80,0.55)" : "rgba(200,150,70,0.35)");
+        if (ok) drawWard(mouse.gx, mouse.gy);
+        const p = project(mouse.gx, mouse.gy, canvas), Z = camera.zoom, label = TUNING.wardCost + "¢";
+        ctx.font = `${11 * Z}px "Fredoka", system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        const wpx = ctx.measureText(label).width + 10 * Z;
+        ctx.fillStyle = "rgba(20,22,28,0.82)"; rrect(ctx, p.x - wpx / 2, p.y - 10 * Z, wpx, 15 * Z, 7 * Z);
+        ctx.fillStyle = ok ? "#f2d08a" : "#c9a25a"; ctx.fillText(label, p.x, p.y - 2.5 * Z);
       }
     } else if (buildConvey) {
       const ok = reach && isWalkable(s, mouse.gx, mouse.gy) && !blockedTiles(s).has(mouse.gx + "," + mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !(s.traps && s.traps[mouse.gx + "," + mouse.gy]);
@@ -885,6 +912,18 @@ function drawTrap(gx, gy, tr) {
   ctx.font = `${9 * Z}px "Fredoka", system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
   ctx.fillStyle = tr.broken ? "#e08a8a" : "#fff";
   ctx.fillText(tr.broken ? "broken" : (tr.uses + "/" + tr.max), c.x, c.y + 11 * Z);
+}
+function drawWard(gx, gy) {
+  // a hatched amber void tile with a padlock: "secured, can't be bought"
+  drawTile(gx, gy, "rgba(180,140,70,0.30)");
+  const c = project(gx, gy, canvas), Z = camera.zoom;
+  const bw = 7 * Z, bh = 5 * Z, top = c.y - 1 * Z;
+  // shackle
+  ctx.strokeStyle = "#e8c877"; ctx.lineWidth = 1.8 * Z;
+  ctx.beginPath(); ctx.arc(c.x, top, 3 * Z, Math.PI, 0); ctx.stroke();
+  // body
+  ctx.fillStyle = "#d8ab4e"; rrect(ctx, c.x - bw / 2, top, bw, bh, 1.6 * Z);
+  ctx.fillStyle = "#5a4517"; ctx.beginPath(); ctx.arc(c.x, top + bh / 2, 1 * Z, 0, Math.PI * 2); ctx.fill();
 }
 function drawTile(gx, gy, fill) {
   const c = tileCorners(gx, gy);

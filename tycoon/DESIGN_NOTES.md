@@ -4,6 +4,26 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Secured (warded) tiles — SHIPPED
+Pay to "secure" a void frontier tile so nobody can buy it. Ring a locked room
+with wards and it can't be tunnelled into by expansion.
+- **Buy from Shop → Expansion** ("Secure Tile", `wardCost` 220, unlocks at
+  research `wardTier` 3, alongside doors/locks). Hold it, walk to your office
+  edge, click the fog tile to secure it.
+- A warded tile is stored in `shared.wards` as `{ "x,y": { by } }`.
+  `isBuyableTile` returns false for any warded tile, so `tryBuyTile` refuses it
+  and the expansion frontier can't cross it. Securable tiles are exactly the fog
+  frontier (`isWardableTile`: void + orthogonally touching floor).
+- **Owner-only release** (`tryRemoveWard`, right-click → "Release secured tile"):
+  only whoever paid can lift a ward, for a `wardRefund` (50%) refund. That
+  owner-only rule is what keeps the seal trustworthy against griefers.
+- Buying a tile clears any ward on it (`tile+` op deletes the ward), so the maps
+  never disagree. Rendered as an amber void tile with a padlock so the secured
+  perimeter is visible.
+- Verified headless: securing blocks buying (owner and stranger alike), a
+  stranger can't release, the owner can (with refund, tile buyable again), and a
+  non-frontier tile is rejected.
+
 ## 2026-09-17 — Conveyor belts + traps (floor contraptions) — SHIPPED
 Two placeable floor overlays, bought from a new Shop "Contraptions" section and
 laid on any empty floor tile within reach.

@@ -44,6 +44,12 @@ export const TUNING = {
   tileGrowth: 1.012,            // each tile you own nudges the next one's price up
   maxTiles: 600,                // total bought tiles cap
 
+  // Wards: pay to "secure" a void frontier tile so nobody can buy it. Ring a
+  // locked room with wards and no one can tunnel in by expanding.
+  wardCost: 220,                // price to secure one void tile
+  wardRefund: 0.5,             // fraction returned when the owner lifts a ward
+  wardTier: 3,                  // research tier to unlock securing (with room locks)
+
   // Conveyor belts: floor overlays that drift whoever/whatever is on them.
   conveyCost: 120,
   conveySpeed: 1.6,          // tiles/sec of drift along a belt

@@ -19,7 +19,7 @@ import {
   buildRange, interactRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal, withinReach, repairCost,
   hasLeash, petActive, enzoPetValue,
   WALL_DECOR, wallPrice, isWallUnlocked, wallIsReal,
-  tileCost, canBuyTiles, isBuyableTile,
+  tileCost, canBuyTiles, isBuyableTile, isWarded, isWardableTile,
 } from "./economy.js";
 
 const round2 = (n) => Math.round(n * 100) / 100;
@@ -243,7 +243,7 @@ function defaultShared() {
   furniture[`1,1`] = { type: "chair", level: 1, by: [] };
   furniture[`2,1`] = { type: "workbench", level: 1, by: [] };
   furniture[`1,2`] = { type: "snacktable", level: 1, by: [] };
-  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], tiles: {}, doors: {}, convey: {}, traps: {}, floor: { x: 0, y: 0, w, h }, furniture, walls: {}, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now(), gear: {} }, research: { contrib: {} }, pot: defaultPot() };
+  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], tiles: {}, doors: {}, convey: {}, traps: {}, wards: {}, floor: { x: 0, y: 0, w, h }, furniture, walls: {}, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now(), gear: {} }, research: { contrib: {} }, pot: defaultPot() };
 }
 function healShared(s) {
   if (!s.rooms) { const w = (s.floor && s.floor.w) || 9, h = (s.floor && s.floor.h) || 9; s.rooms = [{ x: 0, y: 0, w, h }]; }
@@ -254,6 +254,7 @@ function healShared(s) {
   if (!s.doors) s.doors = {};
   if (!s.convey) s.convey = {};
   if (!s.traps) s.traps = {};
+  if (!s.wards) s.wards = {};
   if (!s.furniture) s.furniture = {};
   if (!s.walls) s.walls = {};
   if (!s.sites) s.sites = {};
@@ -455,8 +456,10 @@ export function applyOp(s, op) {
     case "door-": delete s.doors[op.key]; break;
     case "doorLock": { const d = s.doors[op.key]; if (d) { d.locked = op.locked; if ("hash" in op) d.hash = op.hash; } break; }
     case "rooms": s.rooms = op.rooms; s.halls = op.halls; s.floor = op.floor; break;
-    case "tile+": s.tiles = s.tiles || {}; s.tiles[op.key] = 1; s.floor = floorBounds(s); break;
+    case "tile+": s.tiles = s.tiles || {}; s.tiles[op.key] = 1; if (s.wards) delete s.wards[op.key]; s.floor = floorBounds(s); break;
     case "tile-": if (s.tiles) delete s.tiles[op.key]; s.floor = floorBounds(s); break;
+    case "ward+": s.wards = s.wards || {}; s.wards[op.key] = op.val; break;
+    case "ward-": if (s.wards) delete s.wards[op.key]; break;
     case "owed+": s.owed = s.owed || {}; s.owed[op.pid] = round2((s.owed[op.pid] || 0) + op.amt); break;
     case "owed-": if (s.owed) delete s.owed[op.pid]; break;
     case "contrib": { s.research = s.research || { contrib: {} }; s.research.contrib = s.research.contrib || {}; s.research.contrib[op.pid] = round2((s.research.contrib[op.pid] || 0) + op.rp); break; }
@@ -698,6 +701,31 @@ export function tryBuyTile(gx, gy) {
   sharedOp({ t: "tile+", key: gx + "," + gy });
   commit();
   return { ok: true, cost };
+}
+
+// Secure a void frontier tile so no one can buy it. Ring a locked room with wards
+// and it can't be tunnelled into by expansion.
+export function tryPlaceWard(gx, gy) {
+  const s = state.shared, key = gx + "," + gy;
+  if (currentTier(s) < TUNING.wardTier) return { ok: false, why: "Securing tiles unlocks at research Tier " + TUNING.wardTier + "." };
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand at the edge to secure that tile." };
+  if (isWarded(s, gx, gy)) return { ok: false, why: "That tile is already secured." };
+  if (!isWardableTile(s, gx, gy)) return { ok: false, why: "Secure the fog right next to your floor." };
+  if (state.me.credits < TUNING.wardCost) return { ok: false, why: "Not enough credits (" + TUNING.wardCost + ")." };
+  spend(TUNING.wardCost);
+  sharedOp({ t: "ward+", key, val: { by: state.me.id } });
+  commit();
+  return { ok: true, cost: TUNING.wardCost };
+}
+// Only the ward's owner can lift it (that's what keeps the room sealed), for a
+// partial refund.
+export function tryRemoveWard(key) {
+  const s = state.shared, w = s.wards && s.wards[key];
+  if (!w) return { ok: false, why: "No ward there." };
+  if (w.by !== state.me.id) return { ok: false, why: "Only whoever secured this tile can release it." };
+  const refund = Math.round(TUNING.wardCost * TUNING.wardRefund);
+  sharedOp({ t: "ward-", key }); state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
+  return { ok: true, refund };
 }
 
 // ---- doors ----------------------------------------------------------------
