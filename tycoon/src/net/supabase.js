@@ -32,10 +32,10 @@ export function makeSupabaseNet(myId, room) {
   // one alone is enough to see other players.
   function emitPeers() {
     const map = new Map();
-    if (channel) {
-      const st = channel.presenceState();
-      for (const metas of Object.values(st)) for (const m of metas) if (m.id && m.id !== myId) map.set(m.id, m);
-    }
+    try {   // presence can throw/return junk with some keys — must not kill heartbeat peers
+      const st = channel && channel.presenceState();
+      if (st) for (const metas of Object.values(st)) for (const m of (metas || [])) if (m && m.id && m.id !== myId) map.set(m.id, m);
+    } catch (e) { /* fall back to heartbeat peers below */ }
     const cutoff = now() - PEER_TTL;
     for (const [id, e] of hbPeers) { if (e.t < cutoff) hbPeers.delete(id); else if (id !== myId) map.set(id, e.meta); }
     const arr = [...map.values()];
@@ -140,8 +140,9 @@ export function makeSupabaseNet(myId, room) {
         if (lastHb === 0) log("first heartbeat for", myId.slice(0, 6));
         lastHb = t; sendHeartbeat();
       }
-      // slower: track full presence for the roster (the CRDT sync is heavier)
-      if (channel && t - lastPresenceSent > 1000) { lastPresenceSent = t; channel.track(myPresence); }
+      // slower: track full presence for the roster (heavier, and can throw with
+      // some keys — heartbeats above are what actually carry peers)
+      if (channel && t - lastPresenceSent > 1000) { lastPresenceSent = t; try { channel.track(myPresence); } catch (e) {} }
     },
 
     onPeers(cb) { peersCb = cb; },
