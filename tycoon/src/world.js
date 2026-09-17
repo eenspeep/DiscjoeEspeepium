@@ -13,7 +13,7 @@ import {
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
@@ -55,6 +55,7 @@ export function initWorld(canvasEl, hooks = {}) {
     const k = e.key.toLowerCase();
     if (k === "e") { doPush(); return; }
     if (k === "q") { doAttack(); return; }
+    if (k === " " || k === "spacebar") { e.preventDefault(); doJump(); return; }
     if (k === "escape") { setBuild(null); return; }   // drop what's in hand
     if (k === "r" && buildType) { buildRot = (buildRot + 1) % 4; return; }
     keys.add(k);
@@ -102,6 +103,13 @@ export function initWorld(canvasEl, hooks = {}) {
   const zbtn = (txt, mult) => { const b = document.createElement("button"); b.className = "zoom-btn"; b.textContent = txt; b.addEventListener("click", () => { camera.zoom = clamp(camera.zoom * mult, ZMIN, ZMAX); }); return b; };
   zc.appendChild(zbtn("+", 1.2)); zc.appendChild(zbtn("−", 1 / 1.2));
   document.body.appendChild(zc);
+
+  // jump button (also handy on touch, which has no keyboard)
+  const jb = document.createElement("button");
+  jb.className = "jump-btn"; jb.textContent = "⤒ Jump";
+  jb.title = "Jump (Space). 1s invincibility, 60s cooldown.";
+  jb.addEventListener("click", doJump);
+  document.body.appendChild(jb);
 
   requestAnimationFrame(loop);
 }
@@ -203,6 +211,14 @@ function doRecruit() {
   if (!best) return onTileMessage("Get closer to a tired rat to leash it.");
   const r = recruitRat(best.id);
   onTileMessage(r.ok ? "You leashed a rat! It's your buddy for an hour." : r.why);
+}
+
+function doJump() {
+  if (!state.me.created) return;
+  const r = tryJump();
+  if (!r.ok) return;
+  if (r.invuln) onTileMessage("🤸 Jump! Invincible for 1s");
+  else onTileMessage("🤸 Jump! (guard recharging)");
 }
 
 function doAttack() {
@@ -840,10 +856,18 @@ function drawSite(ax, ay, site) {
 function drawMe(t) {
   const p = project(state.me.pos.x, state.me.pos.y, canvas);
   const using = state.me.created && usingKeys(state.me.pos, state.shared, interactRange(state.me)).length > 0;
+  const since = now() - (state.jumpAt || -1e9);
+  const lift = since >= 0 && since < TUNING.jumpArcMs ? Math.sin(Math.PI * (since / TUNING.jumpArcMs)) * TUNING.jumpArcPx * camera.zoom : 0;
+  // golden guard ring while immune
+  if (state.me.created && isInvulnerable()) {
+    const pulse = 0.55 + 0.45 * Math.sin(now() / 110);
+    ctx.save(); ctx.globalAlpha = pulse; ctx.strokeStyle = "#f2d24a"; ctx.lineWidth = 2.4 * camera.zoom;
+    ctx.beginPath(); ctx.ellipse(p.x, p.y + 11 * camera.zoom, 17 * camera.zoom, 8.5 * camera.zoom, 0, 0, 7); ctx.stroke(); ctx.restore();
+  }
   const opts = {
     look: state.me.look, scale: camera.zoom * (state.me.created ? sizeMult(state.me) : 1),
     walking: state.me.moving, t, using, name: state.me.created ? state.me.name : "new Joey",
-    worn: state.me.created ? wornArt(state.me) : {},
+    worn: state.me.created ? wornArt(state.me) : {}, lift,
   };
   if (!drawJoeySprite(ctx, p.x, p.y, opts)) drawJoey(ctx, p.x, p.y, opts);
   if (state.me.created && petActive(state.me)) drawPetRat(p);

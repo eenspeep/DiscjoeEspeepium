@@ -60,6 +60,7 @@ export function initUI(authApi) {
     if (state.justMonsterBlock) { flash("🛡️ " + state.justMonsterBlock.by + " broke " + state.justMonsterBlock.n + " of your shields!"); state.justMonsterBlock = null; }
     if (state.justPetGot) { flash("🐀 You leashed a rat buddy! x1.2 soul, and it eats one hit for you."); state.justPetGot = null; }
     if (state.justPetHit) { flash("🐀💥 Your rat buddy took a hit from " + state.justPetHit.by + " and scurried off."); state.justPetHit = null; }
+    if (state.justDodged) { flash("✨ Mid-jump! You dodged " + state.justDodged + "'s hit."); state.justDodged = null; }
     if (state.justKilled) { flash("☠️ Killed by " + state.justKilled + ". Your gear dropped where you fell. Build a new Joey."); state.justKilled = null; closePanel(); ensureCreator(); }
   }, 400);
 }

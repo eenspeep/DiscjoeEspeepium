@@ -516,6 +516,10 @@ function dropAllItems(me, key) {
 export function receiveAttack(fromName) {
   const me = state.me;
   if (!me.created) return { ignore: true };
+  if (isInvulnerable()) {                 // mid-jump: the hit whiffs entirely
+    state.justDodged = fromName || "someone"; notify();
+    return { blocked: true, dodged: true };
+  }
   if (petActive(me)) {                    // your rat buddy jumps in front and dies for you
     me.pet = null;
     state.meDirty = true; saveMe(); notify();
@@ -595,6 +599,26 @@ export function tryPickup(gx, gy) {
   state.meDirty = true; commit();
   return { ok: taken.length > 0, taken: taken.length, left: left.length };
 }
+
+// ---- jump + brief invulnerability -----------------------------------------
+// A jump always hops (cosmetic). If the guard is off cooldown it also grants 1s
+// of kill-immunity, then a 60s cooldown. State is ephemeral (not saved), so a
+// reload clears it. Immunity is checked on the victim's own client, same trust
+// model as the rest of combat.
+export function tryJump() {
+  const me = state.me; if (!me || !me.created) return { ok: false };
+  const t = now();
+  state.jumpAt = t;                       // world reads this for the hop arc
+  if (t >= (state.jumpCdUntil || 0)) {
+    state.invulnUntil = t + TUNING.jumpInvulnMs;
+    state.jumpCdUntil = t + TUNING.jumpCooldownMs;
+    notify();
+    return { ok: true, invuln: true };
+  }
+  return { ok: true, invuln: false, cdLeft: Math.ceil(((state.jumpCdUntil || 0) - t) / 1000) };
+}
+export function isInvulnerable() { return now() < (state.invulnUntil || 0); }
+export function jumpCdLeft() { return Math.max(0, Math.ceil(((state.jumpCdUntil || 0) - now()) / 1000)); }
 
 // ---- Garlic Charlie -------------------------------------------------------
 
@@ -757,6 +781,7 @@ export function recruitRat(id) {
 // or die if you don't have that many.
 export function receiveMonsterHit(king) {
   const me = state.me; if (!me || !me.created) return;
+  if (isInvulnerable()) { state.justDodged = king ? "The Rat King" : "a rat"; notify(); return; }
   if (petActive(me)) {                    // the rat buddy takes the hit and is gone
     me.pet = null;
     state.justPetHit = { by: king ? "The Rat King" : "a rat" };

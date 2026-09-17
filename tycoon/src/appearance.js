@@ -38,12 +38,12 @@ export function shade(hex, pct) {
   return "#" + ((1 << 24) + (adj(r) << 16) + (adj(g) << 8) + adj(b)).toString(16).slice(1);
 }
 
-export function drawJoey(ctx, cx, cy, { look, worn = {}, scale = 1, walking = false, t = 0, name = "", using = false } = {}) {
+export function drawJoey(ctx, cx, cy, { look, worn = {}, scale = 1, walking = false, t = 0, name = "", using = false, lift = 0 } = {}) {
   const lk = look || defaultLook();
   const skin = PAPER_WHITE, stache = lookColor(lk, "stache"), shirt = lookColor(lk, "shirt");
   const S = scale;
   const bob = walking ? Math.abs(Math.sin(t * 9)) * 2.2 * S : Math.sin(t * 2) * 1.0 * S;
-  ctx.save(); ctx.translate(cx, cy - bob);
+  ctx.save(); ctx.translate(cx, cy - bob - lift);
 
   if (using) { ctx.save(); ctx.scale(1, 0.5); ctx.beginPath(); ctx.arc(0, (12 + bob) / 0.5 * S, 15 * S, 0, 7); ctx.fillStyle = "rgba(70,190,120,0.28)"; ctx.fill(); ctx.restore(); }
   ctx.save(); ctx.scale(1, 0.5); ctx.beginPath(); ctx.arc(0, (10 + bob) / 0.5 * S, 9 * S, 0, 7); ctx.fillStyle = "rgba(0,0,0,0.16)"; ctx.fill(); ctx.restore();
@@ -176,7 +176,7 @@ function nameTag(ctx, cx, topY, name, S) {
 // Gear frame over the sprite. The sprite is 46·scale tall with feet at footY;
 // these map the procedural gear coords (feet +10·S, head −21·S) onto it. Tunable.
 const GEAR_SCALE = 1.16, GEAR_FEET = 11;
-export function drawJoeySprite(ctx, cx, cy, { look, worn = {}, scale = 1, walking = false, t = 0, name = "", using = false } = {}) {
+export function drawJoeySprite(ctx, cx, cy, { look, worn = {}, scale = 1, walking = false, t = 0, name = "", using = false, lift = 0 } = {}) {
   const cv = recoloredJoey(lookColor(look, "stache"), lookColor(look, "shirt"));
   if (!cv) return false;
   const aspect = cv.width / cv.height, H = 46 * scale, W = H * aspect;
@@ -185,14 +185,15 @@ export function drawJoeySprite(ctx, cx, cy, { look, worn = {}, scale = 1, walkin
   const squash = (walking ? 0.15 : 0.04) * cyc;
   const dw = W * (1 + squash), dh = H * (1 - squash);
   const footY = cy + 12 * scale;   // feet sit on the tile, aligned with the shadow
-  ctx.save(); ctx.scale(1, 0.5);
+  ctx.save(); ctx.scale(1, 0.5);   // shadow stays on the ground even mid-jump
+  const shScale = 1 - Math.min(0.5, lift / 60);   // shadow shrinks a touch as you rise
   if (using) { ctx.beginPath(); ctx.arc(cx, (footY - 2 * scale) / 0.5, 15 * scale, 0, 7); ctx.fillStyle = "rgba(70,190,120,0.28)"; ctx.fill(); }
-  ctx.beginPath(); ctx.arc(cx, footY / 0.5, 9 * scale, 0, 7); ctx.fillStyle = "rgba(0,0,0,0.16)"; ctx.fill();
+  ctx.beginPath(); ctx.arc(cx, footY / 0.5, 9 * scale * shScale, 0, 7); ctx.fillStyle = "rgba(0,0,0,0.16)"; ctx.fill();
   ctx.restore();
   ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(cv, cx - dw / 2, footY - dh, dw, dh);
+  ctx.drawImage(cv, cx - dw / 2, footY - dh - lift, dw, dh);
   // layer equipped gear on top of the sprite body
-  const Sg = scale * GEAR_SCALE, oy = footY - GEAR_FEET * Sg;
+  const Sg = scale * GEAR_SCALE, oy = footY - GEAR_FEET * Sg - lift;
   ctx.save(); ctx.translate(cx, oy);
   paintTorsoGear(ctx, worn, Sg, lookColor(look, "shirt"));
   paintFaceGear(ctx, worn, Sg);
