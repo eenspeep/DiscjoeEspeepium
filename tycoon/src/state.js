@@ -161,7 +161,7 @@ function defaultShared() {
   furniture[`1,1`] = { type: "chair", level: 1, by: [] };
   furniture[`2,1`] = { type: "workbench", level: 1, by: [] };
   furniture[`1,2`] = { type: "snacktable", level: 1, by: [] };
-  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, walls: {}, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now() }, research: { contrib: {} }, pot: defaultPot() };
+  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], doors: {}, floor: { x: 0, y: 0, w, h }, furniture, walls: {}, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now(), gear: {} }, research: { contrib: {} }, pot: defaultPot() };
 }
 function healShared(s) {
   if (!s.rooms) { const w = (s.floor && s.floor.w) || 9, h = (s.floor && s.floor.h) || 9; s.rooms = [{ x: 0, y: 0, w, h }]; }
@@ -175,7 +175,8 @@ function healShared(s) {
   if (!s.loot) s.loot = {};
   if (!s.owed) s.owed = {};
   if (!s.monsters) s.monsters = {};
-  if (!s.charlie) s.charlie = { alive: true, diedAt: null, lastBuy: now() };
+  if (!s.charlie) s.charlie = { alive: true, diedAt: null, lastBuy: now(), gear: {} };
+  if (!s.charlie.gear) s.charlie.gear = {};
   if (!s.research) s.research = { contrib: {} };
   if (!s.research.contrib) s.research.contrib = {};
   s.floor = floorBounds(s);
@@ -656,19 +657,23 @@ export function jumpCdLeft() { return Math.max(0, Math.ceil(((state.jumpCdUntil 
 
 export function isCharlieAlive() { return !!(state.shared && state.shared.charlie && state.shared.charlie.alive); }
 
-function charlieDrop() {
+function charlieDropPool() {
   const pool = ["knife", "clipboard", "ballcap", "mug", "boots", "shield_torso", "goggles", "hardhat"];
-  const n = 2 + Math.floor(Math.random() * 3), out = [];
+  const n = 1 + Math.floor(Math.random() * 2), out = [];
   for (let i = 0; i < n; i++) out.push(pool[Math.floor(Math.random() * pool.length)]);
   return out;
 }
 // A player struck Charlie where he stands on their screen. Local resolution:
-// he dies, drops loot, the coins bounty goes to the killer, host respawns him.
+// he dies, drops whatever gear he was wearing, coins bounty go to the killer,
+// host respawns him (naked; he re-shops).
 export function killCharlie(cx, cy) {
   const s = state.shared;
   if (!s.charlie || !s.charlie.alive) return { ok: false };
   const key = Math.round(cx) + "," + Math.round(cy);
-  addLoot(key, charlieDrop());
+  const worn = Object.values(s.charlie.gear || {});
+  const drop = worn.length >= 2 ? worn : worn.concat(charlieDropPool());   // always drop something
+  addLoot(key, drop);
+  s.charlie.gear = {};
   const bounty = Math.max(1, Math.round(TUNING.charlieBountyMult * currentTier(s) * (1 + 0.2 * traitVal(state.me, "bounty"))));   // "Bounty" trait
   state.me.credits = round2(state.me.credits + bounty); state.meDirty = true;
   s.charlie.alive = false; s.charlie.diedAt = now();
@@ -679,27 +684,31 @@ export function killCharlie(cx, cy) {
 
 let lastCharlie = 0;
 function charlieBuyInterval() { return TUNING.charlieBuyMinMs + Math.random() * (TUNING.charlieBuyMaxMs - TUNING.charlieBuyMinMs); }
-function charlieFreeTile() {
-  const s = state.shared, r0 = s.rooms[0], blocked = blockedTiles(s), ents = entityTiles();
-  for (let i = 0; i < 40; i++) {
-    const x = r0.x + Math.floor(Math.random() * r0.w), y = r0.y + Math.floor(Math.random() * r0.h), k = x + "," + y;
-    if (!isWalkable(s, x, y) || blocked.has(k) || ents.has(k)) continue;
-    if ((s.doors && s.doors[k]) || (s.loot && s.loot[k]) || s.furniture[k] || s.sites[k]) continue;
-    return k;
-  }
-  return null;
+// Gear Charlie can wear: any equippable, buyable, unlocked item with a body slot.
+function charlieGearPool(s) {
+  return Object.keys(ITEMS).filter((t) => {
+    const d = ITEMS[t];
+    return d.slot && d.slot !== "bag" && !d.noEquip && (d.costUnit || 0) > 0 && itemTier(t) <= currentTier(s) && esoOfItem(t) === 0;
+  });
 }
-function charlieMaybeBuy(t) {
+// Charlie buys a random piece of gear. If its slot's full or he's at capacity he
+// either swaps it in (tossing the old) or tosses the new one. Discards just vanish.
+function charlieMaybeBuyGear(t) {
   const s = state.shared, c = s.charlie;
+  c.gear = c.gear || {};
   if (!c.buyGap) c.buyGap = charlieBuyInterval();
   if (t < (c.lastBuy || 0) + c.buyGap) return;
   c.lastBuy = t; c.buyGap = charlieBuyInterval();
-  if (Object.keys(s.furniture).length + Object.keys(s.sites).length >= TUNING.charlieMaxFurniture) return;
-  const cap = Math.min(2, currentTier(s));
-  const types = FURNITURE_ORDER.filter((ty) => furnitureTier(ty) <= cap && esoOfFurniture(ty) === 0 && footprintCells(ty, 0, 0, 0).length === 1);
-  if (!types.length) return;
-  const spot = charlieFreeTile(); if (!spot) return;
-  s.furniture[spot] = { type: types[Math.floor(Math.random() * types.length)], level: 1, by: [CHARLIE_ID] };
+  const pool = charlieGearPool(s); if (!pool.length) return;
+  const type = pool[Math.floor(Math.random() * pool.length)], slot = ITEMS[type].slot;
+  const slots = Object.keys(c.gear);
+  if (c.gear[slot]) {                                   // slot taken: swap or toss
+    if (Math.random() < 0.5) c.gear[slot] = type;       // switch it out (old is gone)
+  } else if (slots.length >= TUNING.charlieMaxGear) {   // no room: toss the new, or drop a worn piece for it
+    if (Math.random() < 0.5) { delete c.gear[slots[Math.floor(Math.random() * slots.length)]]; c.gear[slot] = type; }
+  } else {
+    c.gear[slot] = type;                                // plenty of room: just wear it
+  }
   state.dirty = true;
 }
 function charlieTick(t) {
@@ -707,7 +716,7 @@ function charlieTick(t) {
   const s = state.shared; if (!s || !s.charlie) return;
   const dt = (t - (lastCharlie || t)) / 1000; lastCharlie = t;
   if (!s.charlie.alive) {
-    if (s.charlie.diedAt && t - s.charlie.diedAt >= TUNING.charlieRespawnMs) { s.charlie.alive = true; s.charlie.diedAt = null; s.charlie.lastBuy = t; s.charlie.buyGap = null; state.dirty = true; }
+    if (s.charlie.diedAt && t - s.charlie.diedAt >= TUNING.charlieRespawnMs) { s.charlie.alive = true; s.charlie.diedAt = null; s.charlie.lastBuy = t; s.charlie.buyGap = null; s.charlie.gear = {}; state.dirty = true; }
     return;
   }
   const pot = s.pot;
@@ -720,7 +729,7 @@ function charlieTick(t) {
   if (pot && pot.phase === "voting" && !pot.votes[CHARLIE_ID] && (pot.contributions[CHARLIE_ID] || 0) > 0) {
     pot.votes[CHARLIE_ID] = PROPOSALS[Math.floor(Math.random() * PROPOSALS.length)].id; state.dirty = true;
   }
-  charlieMaybeBuy(t);
+  charlieMaybeBuyGear(t);
 }
 
 // ---- rats + monsters ------------------------------------------------------

@@ -69,9 +69,9 @@ export const TUNING = {
   attackRange: 1.55,                    // must be this close (diagonal-adjacent) to strike
   charlieDonatePerSec: 0.25,            // Charlie funnels this into the team pot (his "10%")
   charlieRespawnMs: 60 * 60 * 1000,     // he comes back once an hour
-  charlieBuyMinMs: 6 * 60 * 1000,       // random, far-apart furniture buys
-  charlieBuyMaxMs: 18 * 60 * 1000,
-  charlieMaxFurniture: 40,              // stop Charlie buying once the office is this full
+  charlieBuyMinMs: 3 * 60 * 1000,       // random, far-apart gear buys
+  charlieBuyMaxMs: 10 * 60 * 1000,
+  charlieMaxGear: 4,                     // he only wears this many pieces; extras get tossed/swapped
   charlieBountyMult: 60,                // coins the killer takes = this × current tier
   killSoulMult: 0.1,                    // each kill nudges your soul channeling (sin fuels it)
 
