@@ -411,8 +411,9 @@ function updateNPCs(dt) {
   const solid = (gx, gy) => { const k = gx + "," + gy; if (!walk.has(k) || blocked.has(k)) return true; const d = doors[k]; return !!(d && d.locked); };
   let walkList = null;
   const pick = () => { if (!walkList) walkList = [...walk].map((k) => k.split(",").map(Number)).filter(([x, y]) => !solid(x, y)); return walkList.length ? walkList[Math.floor(Math.random() * walkList.length)] : null; };
-  // Charlie hunts rats that are standing in a protected (communal) room.
-  const protRats = Object.entries(s.monsters || {}).filter(([id, m]) => m.kind === "rat" && isProtected(s, Math.round(m.x), Math.round(m.y)));
+  // Charlie hunts only TIRED rats that are in a protected (communal) room —
+  // he cleans up strays, he doesn't steal fresh kills.
+  const protRats = Object.entries(s.monsters || {}).filter(([id, m]) => m.kind === "rat" && m.tired && isProtected(s, Math.round(m.x), Math.round(m.y)));
   for (const n of activeBots()) {
     let hunt = null, hd = Infinity;
     for (const [id, m] of protRats) { const d = Math.hypot(m.x - n.x, m.y - n.y); if (d < hd) { hd = d; hunt = { id, x: m.x, y: m.y }; } }
