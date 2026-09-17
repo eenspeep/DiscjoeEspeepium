@@ -162,7 +162,7 @@ function renderHud() {
       el("button", { class: "btn" + (openView === "shop" ? " alert" : ""), onclick: toggleShop }, ["🛒 Shop"]),
       el("button", { class: "btn", onclick: toggleLocker }, ["Locker"]),
       el("button", { class: "btn" + (voting ? " alert" : ""), onclick: togglePot }, [voting ? "Vote!" : "Team Pot"]),
-      el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · Space jump · Q attack (need a weapon in hand) · U unstick (warp to center) · walk into someone to shove them · click a 📦 to grab loot · stand by furniture to use it"), title: "Help" }, ["?"]),
+      el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · right-click (or long-press) for actions: attack a person/rat, sell or pick up & move furniture · Space jump · Q attack (need a weapon) · U unstick · walk into someone to shove them · click a 📦 for loot · +/− buttons to zoom"), title: "Help" }, ["?"]),
       (me.created && isAdminUser()) ? el("button", { class: "btn alert", title: "Debug: 1s invincible + noclip, +1000¢", onclick: () => { const r = cheatBoost(); if (r.ok) flash("🛠️ BOOST — invincible + noclip 1s, +1000¢"); } }, ["🛠️ Boost"]) : null,
     ])
   );

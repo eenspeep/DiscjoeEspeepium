@@ -15,7 +15,7 @@ import {
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick, tryTeleport, charlieEatRat } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick, tryTeleport, charlieEatRat, trySellFurniture, tryLiftFurniture, tryDropFurniture, sellRefundWho } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
@@ -37,6 +37,9 @@ export function unlockDoorLocal(key) { unlockedDoors.add(key); }
 const keys = new Set();
 let mouse = { sx: 0, sy: 0, gx: 0, gy: 0, over: false };
 let target = null;
+let chase = null;        // { kind, id } — walk to this entity and attack it when in range
+let movingFurn = null;   // furniture data picked up to relocate (place on next click)
+let ctxMenu = null;      // open right-click / long-press menu element
 let selectedKey = null;
 const renderPeers = new Map();
 const renderMons = new Map();
@@ -62,8 +65,14 @@ export function initWorld(canvasEl, hooks = {}) {
     if (k === "q") { doAttack(); return; }
     if (k === "u") { doUnstick(); return; }
     if (k === " " || k === "spacebar") { e.preventDefault(); doJump(); return; }
-    if (k === "escape") { setBuild(null); return; }   // drop what's in hand
+    if (k === "escape") {
+      closeContextMenu();
+      if (movingFurn) { const [ox, oy] = movingFurn.origKey.split(",").map(Number); tryDropFurniture(ox, oy, movingFurn.f.rot || 0, movingFurn.f); movingFurn = null; onTileMessage("Put it back."); return; }
+      chase = null; setBuild(null); return;   // drop what's in hand / stop chasing
+    }
+    if (k === "r" && movingFurn) { movingFurn.rot = ((movingFurn.rot || 0) + 1) % 4; return; }
     if (k === "r" && buildType) { buildRot = (buildRot + 1) % 4; return; }
+    if ("wasd".includes(k) || k.startsWith("arrow")) chase = null;   // manual move cancels a chase
     keys.add(k);
   });
   window.addEventListener("keyup", (e) => keys.delete(e.key.toLowerCase()));
@@ -78,39 +87,36 @@ export function initWorld(canvasEl, hooks = {}) {
   });
   canvas.addEventListener("mouseleave", () => (mouse.over = false));
   canvas.addEventListener("click", onClick);
-  // right-click: Blink power teleports to the clicked tile (within range)
-  canvas.addEventListener("contextmenu", (e) => {
-    e.preventDefault();
-    if (!hasPower(state.me, "blink")) return;
-    const r = canvas.getBoundingClientRect();
-    const g = screenToGrid((e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr, canvas);
-    const res = tryTeleport(Math.round(g.gx), Math.round(g.gy));
-    if (res.ok) onTileMessage("✨ Blink!"); else if (res.why) onTileMessage(res.why);
-  });
+  // right-click: radial actions on whatever's under the cursor (attack / sell / move / blink)
+  canvas.addEventListener("contextmenu", (e) => { e.preventDefault(); openContextMenu(e.clientX, e.clientY); });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     camera.zoom = clamp(camera.zoom * (e.deltaY > 0 ? 0.92 : 1.08), ZMIN, ZMAX);
   }, { passive: false });
 
-  // touch: pinch to zoom, one-finger tap to act (walk / click furniture / Enzo)
-  let pinchBase = 0, pinchZoom = 0, tap = null;
-  const dist2 = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
+  // touch: one-finger tap acts; a still long-press opens the context menu.
+  // (Pinch-to-zoom is intentionally OFF — use the on-screen +/- buttons; it kept
+  // firing by accident while tapping buttons/menus.)
+  let tap = null, holdTimer = null;
+  const clearHold = () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } };
   canvas.addEventListener("touchstart", (e) => {
-    if (e.touches.length === 2) { pinchBase = dist2(e.touches); pinchZoom = camera.zoom; tap = null; }
-    else if (e.touches.length === 1) { const t = e.touches[0]; tap = { x: t.clientX, y: t.clientY, moved: false }; }
+    if (e.touches.length !== 1) { tap = null; clearHold(); return; }
+    const t = e.touches[0]; tap = { x: t.clientX, y: t.clientY, moved: false };
+    clearHold();
+    holdTimer = setTimeout(() => { if (tap && !tap.moved) { openContextMenu(tap.x, tap.y); tap = null; } }, 480);
   }, { passive: false });
   canvas.addEventListener("touchmove", (e) => {
-    if (e.touches.length === 2 && pinchBase > 0) { e.preventDefault(); camera.zoom = clamp(pinchZoom * (dist2(e.touches) / pinchBase), ZMIN, ZMAX); }
-    else if (e.touches.length === 1 && tap) { const t = e.touches[0]; if (Math.hypot(t.clientX - tap.x, t.clientY - tap.y) > 12) tap.moved = true; }
+    if (e.touches.length === 1 && tap) { const t = e.touches[0]; if (Math.hypot(t.clientX - tap.x, t.clientY - tap.y) > 12) { tap.moved = true; clearHold(); } }
   }, { passive: false });
   canvas.addEventListener("touchend", (e) => {
+    clearHold();
     if (tap && !tap.moved && e.changedTouches.length) {
       const t = e.changedTouches[0], r = canvas.getBoundingClientRect();
       mouse.sx = (t.clientX - r.left) * dpr; mouse.sy = (t.clientY - r.top) * dpr; mouse.over = true;
       const g = screenToGrid(mouse.sx, mouse.sy, canvas); mouse.gx = Math.round(g.gx); mouse.gy = Math.round(g.gy);
       onClick();
     }
-    tap = null; pinchBase = 0;
+    tap = null;
   }, { passive: false });
 
   // on-screen zoom buttons (also handy on desktop)
@@ -129,15 +135,17 @@ export function initWorld(canvasEl, hooks = {}) {
   requestAnimationFrame(loop);
 }
 
-export function setBuild(type) { buildType = type; buildMod = null; buildDoor = false; buildWall = null; buildExpand = false; }
+// If you're carrying a picked-up piece and grab a different tool, set it back down.
+function dropCarriedBack() { if (movingFurn) { const [ox, oy] = movingFurn.origKey.split(",").map(Number); tryDropFurniture(ox, oy, movingFurn.f.rot || 0, movingFurn.f); movingFurn = null; } }
+export function setBuild(type) { dropCarriedBack(); buildType = type; buildMod = null; buildDoor = false; buildWall = null; buildExpand = false; }
 export function getBuild() { return buildType; }
-export function setBuildMod(type) { buildMod = type; buildType = null; buildDoor = false; buildWall = null; buildExpand = false; }
+export function setBuildMod(type) { dropCarriedBack(); buildMod = type; buildType = null; buildDoor = false; buildWall = null; buildExpand = false; }
 export function getBuildMod() { return buildMod; }
-export function setBuildDoor(on) { buildDoor = on; buildType = null; buildMod = null; buildWall = null; buildExpand = false; }
+export function setBuildDoor(on) { dropCarriedBack(); buildDoor = on; buildType = null; buildMod = null; buildWall = null; buildExpand = false; }
 export function getBuildDoor() { return buildDoor; }
-export function setBuildWall(type) { buildWall = type; buildType = null; buildMod = null; buildDoor = false; buildExpand = false; }
+export function setBuildWall(type) { dropCarriedBack(); buildWall = type; buildType = null; buildMod = null; buildDoor = false; buildExpand = false; }
 export function getBuildWall() { return buildWall; }
-export function setBuildExpand(on) { buildExpand = on; buildType = null; buildMod = null; buildDoor = false; buildWall = null; }
+export function setBuildExpand(on) { dropCarriedBack(); buildExpand = on; buildType = null; buildMod = null; buildDoor = false; buildWall = null; }
 export function getBuildExpand() { return buildExpand; }
 export function setSelected(key) { selectedKey = key; }
 
@@ -150,6 +158,12 @@ function resize() {
 function onClick() {
   if (!mouse.over || !state.me.created) return;
   const gx = mouse.gx, gy = mouse.gy;
+  if (movingFurn) {    // setting down a piece you picked up to relocate
+    const r = tryDropFurniture(gx, gy, movingFurn.rot || 0, movingFurn.f);
+    if (r.ok) { onTileMessage("✋ Moved " + (FURNITURE[movingFurn.f.type] ? FURNITURE[movingFurn.f.type].name : "furniture") + "."); movingFurn = null; }
+    else onTileMessage(r.why || "Can't set it down there.");
+    return;
+  }
   if (buildExpand) {   // buying floor out of the fog
     const r = tryBuyTile(gx, gy);
     onTileMessage(r.ok ? ("Floor claimed for " + r.cost + "¢.") : (r.why || "Can't expand there."));
@@ -208,6 +222,66 @@ function onClick() {
   if (fKey) { onFurnitureClick(fKey, state.shared.furniture[fKey]); return; }
   if (sKey) { onSiteClick(sKey, state.shared.sites[sKey]); return; }
   if (isWalkable(state.shared, gx, gy)) target = { x: gx, y: gy };
+}
+
+// ---- right-click / long-press context menu --------------------------------
+export function closeContextMenu() { if (ctxMenu) { ctxMenu.remove(); ctxMenu = null; } }
+// nearest person/bot/monster to a tile (within ~0.9), for "walk to & attack"
+function entityAt(gx, gy) {
+  let best = null, bd = 0.9;
+  const consider = (kind, id, x, y, name) => { const d = Math.hypot(x - gx, y - gy); if (d < bd) { bd = d; best = { kind, id, x, y, name }; } };
+  for (const [id, r] of renderPeers) consider("peer", id, r.x, r.y, r.name || "them");
+  for (const n of activeBots()) consider("bot", n.id, n.x, n.y, n.name || "Charlie");
+  for (const [id, r] of renderMons) consider("mon", id, r.x, r.y, r.kind === "king" ? "the Rat King" : "a rat");
+  return best;
+}
+function contextActions(gx, gy) {
+  const s = state.shared, out = [];
+  const ent = entityAt(gx, gy);
+  if (ent) out.push({ label: "⚔️ Walk to & attack " + ent.name, run: () => { chase = { kind: ent.kind, id: ent.id }; onTileMessage("Chasing " + ent.name + "…"); } });
+  const fKey = furnitureAnchorAt(s, gx, gy);
+  if (fKey) {
+    const f = s.furniture[fKey], name = FURNITURE[f.type] ? FURNITURE[f.type].name : "furniture";
+    out.push({ label: "💰 Sell " + name + " (refund to " + sellRefundWho(f) + ")", run: () => { const r = trySellFurniture(fKey); onTileMessage(!r.ok ? (r.why || "Can't sell.") : r.toOther ? "Sold — " + Math.round(r.refund) + "¢ to its buyer." : "Sold for " + Math.round(r.refund) + "¢."); } });
+    out.push({ label: "✋ Pick up & move " + name, run: () => { const r = tryLiftFurniture(fKey); if (r.ok) { movingFurn = { f: r.f, rot: r.f.rot || 0, origKey: fKey }; onTileMessage("Carrying it — click a spot to set it down (R rotates, Esc cancels)."); } else onTileMessage(r.why || "Can't move it."); } });
+  }
+  const sKey = siteAnchorAt(s, gx, gy);
+  if (!fKey && sKey) out.push({ label: "🔨 Open build site", run: () => onSiteClick(sKey, s.sites[sKey]) });
+  if (hasPower(state.me, "blink") && isWalkable(s, gx, gy)) out.push({ label: "✨ Blink here", run: () => { const r = tryTeleport(gx, gy); if (r.ok) onTileMessage("✨ Blink!"); else if (r.why) onTileMessage(r.why); } });
+  if (!ent && !fKey && !sKey && isWalkable(s, gx, gy)) out.push({ label: "🚶 Walk here", run: () => { target = { x: gx, y: gy }; } });
+  return out;
+}
+function openContextMenu(clientX, clientY) {
+  closeContextMenu();
+  if (!state.me.created) return;
+  const r = canvas.getBoundingClientRect();
+  const g = screenToGrid((clientX - r.left) * dpr, (clientY - r.top) * dpr, canvas);
+  const gx = Math.round(g.gx), gy = Math.round(g.gy);
+  const actions = contextActions(gx, gy);
+  if (!actions.length) return;
+  const menu = document.createElement("div"); menu.className = "ctx-menu";
+  for (const a of actions) { const b = document.createElement("button"); b.className = "ctx-item"; b.textContent = a.label; b.addEventListener("click", () => { closeContextMenu(); a.run(); }); menu.appendChild(b); }
+  document.body.appendChild(menu);
+  // keep it on-screen
+  const mw = menu.offsetWidth, mh = menu.offsetHeight, vw = window.innerWidth, vh = window.innerHeight;
+  menu.style.left = Math.min(clientX, vw - mw - 6) + "px";
+  menu.style.top = Math.min(clientY, vh - mh - 6) + "px";
+  ctxMenu = menu;
+  setTimeout(() => window.addEventListener("pointerdown", onCtxOutside, true), 0);
+}
+function onCtxOutside(e) { if (ctxMenu && !ctxMenu.contains(e.target)) { closeContextMenu(); window.removeEventListener("pointerdown", onCtxOutside, true); } }
+
+// Chase: each frame steer toward the chased entity; attack when in range, then stop.
+function updateChase() {
+  if (!chase || !state.me.created) { return; }
+  let pos = null;
+  if (chase.kind === "peer") { const r = renderPeers.get(chase.id); if (r) pos = r; }
+  else if (chase.kind === "mon") { const r = renderMons.get(chase.id); if (r) pos = r; }
+  else if (chase.kind === "bot") { const n = activeBots().find((b) => b.id === chase.id); if (n) pos = n; }
+  if (!pos) { chase = null; return; }                 // target gone (dead / left)
+  const d = Math.hypot(pos.x - state.me.pos.x, pos.y - state.me.pos.y);
+  if (d <= attackRangeFor(state.me)) { doAttack(); chase = null; return; }   // in range → swing once
+  target = { x: pos.x, y: pos.y };                     // otherwise keep closing in
 }
 
 // Walking into someone shoves them: once per second per target, they slide one
@@ -461,7 +535,7 @@ function loop() {
   const t = now();
   const dt = clamp((t - lastFrame) / 1000, 0, 0.1);
   lastFrame = t;
-  updateMe(dt); updatePeers(dt); updateNPCs(dt); updateMonsters(dt);
+  updateChase(dt); updateMe(dt); updatePeers(dt); updateNPCs(dt); updateMonsters(dt);
 
   const tw = gridWorld(state.me.pos.x, state.me.pos.y);
   camera.x = lerp(camera.x, tw.x, clamp(dt * 4, 0, 1));
@@ -515,7 +589,13 @@ function draw(t) {
 
   if (mouse.over && state.me.created) {
     const reach = withinReach(state.me, mouse.gx, mouse.gy);
-    if (buildType) {
+    if (movingFurn) {
+      const blocked = blockedTiles(s);
+      for (const [cx, cy] of footprintCells(movingFurn.f.type, mouse.gx, mouse.gy, movingFurn.rot || 0)) {
+        const ok = reach && isWalkable(s, cx, cy) && !blocked.has(cx + "," + cy) && !s.doors[cx + "," + cy];
+        drawTile(cx, cy, ok ? "rgba(70,190,120,0.55)" : "rgba(230,80,70,0.5)");
+      }
+    } else if (buildType) {
       const blocked = blockedTiles(s);
       for (const [cx, cy] of footprintCells(buildType, mouse.gx, mouse.gy, buildRot)) {
         const ok = reach && isWalkable(s, cx, cy) && !blocked.has(cx + "," + cy) && !s.doors[cx + "," + cy];

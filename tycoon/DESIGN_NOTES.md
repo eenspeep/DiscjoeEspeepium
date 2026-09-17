@@ -4,6 +4,24 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — QOL: no pinch-zoom + right-click/long-press action menu — SHIPPED
+- **Pinch-to-zoom removed.** It kept firing by accident while tapping buttons on
+  mobile. Two-finger touch does nothing now; zoom is the on-screen +/− buttons
+  (and mouse wheel on desktop).
+- **Right-click / long-press context menu.** Right-clicking (or long-pressing on
+  touch, ~480ms still) whatever's under the cursor opens a small action menu:
+  - a person/rat/king → "⚔️ Walk to & attack" (sets a `chase`: steer to it each
+    frame, swing when in attack range, then stop; manual WASD or Escape cancels).
+  - furniture → "💰 Sell (refund to you/its buyer)" and "✋ Pick up & move".
+  - the Blink power → "✨ Blink here" (was the old bare right-click); empty tile →
+    "🚶 Walk here".
+  - **Pick up & move**: `tryLiftFurniture` removes the piece intact (level, mods,
+    owners) and hands it to a `movingFurn` carry state; the hovered footprint
+    previews green/red; click sets it down (`tryDropFurniture`, no cost), R
+    rotates, Esc puts it back, and grabbing any other tool returns it too.
+  Verified the menus (furniture + rat), the lift/drop move, and that it all
+  renders.
+
 ## 2026-09-17 — One resource per furniture (altar = soul only) — SHIPPED
 Furniture was double-dipping: the Esoteric Altar/Obelisk were role `gold` (from
 their `neutral` tag) AND channelled soul, so they paid gold and soul at once.

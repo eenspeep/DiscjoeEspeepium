@@ -622,6 +622,34 @@ export function trySellFurniture(key) {
   commit();
   return { ok: true, refund, toOther };
 }
+// Who a sell refunds: "you" if you paid (or nobody did), else "its buyer".
+export function sellRefundWho(f) { const p = f && f.paidBy; return (!p || p === state.me.id) ? "you" : "its buyer"; }
+
+// Pick furniture up to relocate it (keeps its level, mods, owners). Removes it
+// from the office and hands the data back to the caller to carry + re-drop.
+export function tryLiftFurniture(key) {
+  const s = state.shared, f = s.furniture[key]; if (!f) return { ok: false };
+  const [gx, gy] = key.split(",").map(Number), prot = isProtected(s, gx, gy);
+  if (!prot && Array.isArray(f.by) && f.by.length && !f.by.includes(state.me.id)) return { ok: false, why: "Only its builders can move it." };
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand next to it to pick it up." };
+  const data = JSON.parse(JSON.stringify(f));   // keep level, mods, paidBy, by, rot
+  sharedOp({ t: "furn-", key }); commit();
+  return { ok: true, f: data };
+}
+// Put a carried piece back down at a new anchor (no cost — it's a move).
+export function tryDropFurniture(gx, gy, rot, f) {
+  const s = state.shared, key = `${gx},${gy}`, type = f.type;
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand closer to set it down." };
+  const cells = footprintCells(type, gx, gy, rot);
+  for (const [cx, cy] of cells) if (!isWalkable(s, cx, cy)) return { ok: false, why: "It doesn't fit there." };
+  const blocked = blockedTiles(s);
+  for (const [cx, cy] of cells) if (blocked.has(cx + "," + cy) || (s.doors && s.doors[cx + "," + cy])) return { ok: false, why: "That space is taken." };
+  const occ = entityTiles();
+  for (const [cx, cy] of cells) if (occ.has(cx + "," + cy)) return { ok: false, why: "Someone's standing there." };
+  sharedOp({ t: "furn+", key, val: { ...f, rot } }); commit();
+  return { ok: true };
+}
+
 export function tryAddRoom() {
   const s = state.shared;
   if (!canAddRoom(s)) return { ok: false, why: "The office is at max size." };
