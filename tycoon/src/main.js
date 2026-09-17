@@ -22,8 +22,22 @@ async function doLogout() {
   setAccount(null); setProfileSaver(null);
 }
 
+// A connection id that is STABLE across a page refresh but unique per tab. If it
+// were fresh every load (uid()), a refresh made your old id a lingering ghost
+// peer (you show up twice) and churned host election (both-host / a dead ghost
+// elected host, so shared edits like selling never converge). sessionStorage
+// survives reload in the same tab and is separate per tab, which is exactly what
+// we want: refresh reuses the id, a second tab/device gets its own.
+function stableNetId() {
+  try {
+    let id = sessionStorage.getItem("joetime:netid");
+    if (!id) { id = uid(); sessionStorage.setItem("joetime:netid", id); }
+    return id;
+  } catch (e) { return uid(); }
+}
+
 async function boot() {
-  const myId = uid();
+  const myId = stableNetId();
   onProfileError((kind, msg) => flash((kind === "save" ? "☁️ Cloud save failed: " : "☁️ Cloud load failed: ") + msg));
   const net = await connectNet(myId);
   await initState(net);

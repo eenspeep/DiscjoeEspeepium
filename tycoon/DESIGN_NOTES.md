@@ -4,6 +4,23 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Stable connection id (duplicate Joeys + selling) — SHIPPED
+Two symptoms, one cause. The connection id (`net.myId`) was a fresh `uid()` every
+page load. On refresh your old id lingered as a ghost peer (you appeared twice)
+AND host election churned: a dead ghost or a second live client could hold/claim
+host, so with the new host-ignore guard the two clients split-brained and shared
+edits like selling furniture never crossed over. Duplicates appearing at all
+confirmed broadcasts now route (the presence removal worked); the bug was
+identity, not transport.
+
+Fix: `myId` is now stored in `sessionStorage` (`joetime:netid`), which survives a
+refresh in the same tab and is separate per tab. A refresh reuses the id, so the
+peer entry is updated in place (no ghost, no duplicate) and election stays put
+(one stable host). A second tab or device still gets its own id. Verified with a
+two-tab test: refresh keeps the same id and the other client keeps seeing exactly
+one peer. With one stable host, the host-authority path (sell = op to host, host
+rebroadcasts removal, host ignores inbound full-state) actually converges.
+
 ## 2026-09-17 — Host ignores inbound full-state ("sold furniture reappears") — SHIPPED
 Selling furniture, then watching it reappear a moment later, is the host
 overwriting its own authoritative state from an inbound full-state broadcast.
