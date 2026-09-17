@@ -4,6 +4,13 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Toast de-dupe (no bubble spam) — SHIPPED
+`flash()` now keeps one toast per distinct message. A repeat of a message that's
+already showing (spam-clicking Enzo for "🐱 Enzo blesses you (+1¢)") shakes the
+existing bubble and resets its dismiss timer instead of stacking a new one up
+the screen. Different messages still stack as before. Shake is a 0.32s CSS
+keyframe (`toast-shake`).
+
 ## 2026-09-16 — Cosmetic pass: gear on the body + shaped furniture — SHIPPED
 Two visual upgrades.
 

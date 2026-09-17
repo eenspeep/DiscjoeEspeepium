@@ -87,11 +87,29 @@ function progTrack(cls, icon, prog, rate, title) {
   ]);
 }
 
+// One toast per distinct message. A repeat (e.g. spam-clicking Enzo) shakes the
+// existing bubble and resets its timer instead of stacking new ones up the screen.
+const activeToasts = new Map();   // msg -> { el, timer }
+function dismissToast(msg) {
+  const entry = activeToasts.get(msg); if (!entry) return;
+  activeToasts.delete(msg);
+  entry.el.classList.remove("show");
+  setTimeout(() => entry.el.remove(), 300);
+}
 export function flash(msg) {
+  const existing = activeToasts.get(msg);
+  if (existing) {
+    clearTimeout(existing.timer);
+    const e = existing.el;
+    e.classList.remove("shake"); void e.offsetWidth; e.classList.add("shake");   // retrigger the shake
+    existing.timer = setTimeout(() => dismissToast(msg), 2400);
+    return;
+  }
   const t = el("div", { class: "toast-item", text: msg });
   toast.appendChild(t);
   setTimeout(() => t.classList.add("show"), 10);
-  setTimeout(() => { t.classList.remove("show"); setTimeout(() => t.remove(), 300); }, 2400);
+  const entry = { el: t, timer: setTimeout(() => dismissToast(msg), 2400) };
+  activeToasts.set(msg, entry);
 }
 
 function refresh() {
