@@ -31,7 +31,16 @@ export const state = {
 
 const listeners = new Set();
 export function onChange(cb) { listeners.add(cb); return () => listeners.delete(cb); }
-function notify() { for (const cb of listeners) cb(); }
+// Coalesce bursts of notify() into one UI refresh per frame (net events, ticks,
+// and actions can all fire in quick succession — no need to rebuild DOM each time).
+let notifyPending = false;
+function runNotify() { notifyPending = false; for (const cb of listeners) cb(); }
+function notify() {
+  if (notifyPending) return;
+  notifyPending = true;
+  if (typeof requestAnimationFrame !== "undefined") requestAnimationFrame(runNotify);
+  else setTimeout(runNotify, 0);
+}
 
 let profileSaver = null;
 export function setProfileSaver(fn) { profileSaver = fn; }
@@ -103,14 +112,22 @@ function loadMe() {
 }
 
 export function saveMe() {
+  state.me.savedAt = Date.now();   // so the freshest copy wins on next load
   try { localStorage.setItem(ME_KEY, JSON.stringify(state.me)); } catch {}
   state.meDirty = false;
   if (profileSaver && state.account) profileSaver(state.me);
 }
 
-// Replace local Joey with a cloud profile after login (or start fresh if null).
+// Adopt a cloud profile after login. On the same device localStorage is always
+// as-fresh-or-fresher (it saves instantly; the cloud save is debounced), so a
+// quick refresh must not clobber it with a stale cloud copy. Keep local when
+// it's the same created Joey and not older than the cloud copy.
 export function adoptProfile(data) {
-  if (data && data.id) { state.me = healMe(data); if (state.me.created) applyOffline(); else centerMe(); }
+  if (data && data.id) {
+    const local = state.me;
+    const keepLocal = local && local.created && local.id === data.id && (local.savedAt || 0) >= (data.savedAt || 0);
+    if (!keepLocal) { state.me = healMe(data); if (state.me.created) applyOffline(); else centerMe(); }
+  }
   saveMe(); notify();
 }
 export function setAccount(acc) { state.account = acc; }
@@ -203,7 +220,12 @@ export async function initState(net) {
   } else centerMe();
 
   net.onShared((rs) => { if (!rs || !rs.floor) return; state.shared = healShared(rs); notify(); });
-  net.onPeers((peers) => { state.peers = peers; electHost(); notify(); });
+  net.onPeers((peers) => {
+    state.peers = peers;   // the render loop reads positions from here every frame
+    electHost();
+    const ids = peers.map((p) => p.id).sort().join(",");   // only rebuild UI when the roster changes, not on every position tick
+    if (ids !== state._peerIds) { state._peerIds = ids; notify(); }
+  });
   electHost();
   return state;
 }

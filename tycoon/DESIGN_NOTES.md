@@ -4,6 +4,19 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Multiplayer perf + look persistence — SHIPPED
+Fixes for "super laggy" and "forgets our colors on refresh":
+- **Peers by broadcast, cheaply.** Position heartbeats broadcast ~7/s (smooth
+  peer movement), full presence.track only ~1/s, room-state upserts coalesced
+  to ~2/s. `onPeers` now only calls `notify()` when the peer *roster* changes,
+  not on every position tick — the render loop reads positions from `state.peers`
+  each frame without a DOM rebuild. `notify()` itself is coalesced to one UI
+  refresh per animation frame.
+- **Look persistence.** `saveMe` stamps `savedAt`. On login `adoptProfile` keeps
+  the local Joey when it's the same created id and not older than the cloud copy,
+  so a quick refresh no longer reverts colors to a stale (debounced) cloud save.
+  A genuinely newer cloud copy, or a different account, still adopts the cloud.
+
 ## 2026-09-17 — Garlic Charlie buys gear (no more furniture) — SHIPPED
 Charlie no longer drops furniture into the office (that cluttered the room and
 annoyed the owner). Instead he periodically buys a random equippable gear item

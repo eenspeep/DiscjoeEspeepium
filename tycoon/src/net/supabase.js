@@ -18,6 +18,8 @@ export function makeSupabaseNet(myId, room) {
   let msgCb = () => {};
   let myPresence = null;
   let lastPresenceSent = 0;
+  let lastHb = 0;
+  let pushTimer = null, pendingShared = null, lastPush = 0;
   const hbPeers = new Map();   // id -> { meta, t } from broadcast heartbeats
   const PEER_TTL = 6000;
 
@@ -41,6 +43,13 @@ export function makeSupabaseNet(myId, room) {
   }
   function sendHeartbeat() {
     if (channel && myPresence) channel.send({ type: "broadcast", event: "msg", payload: { type: "__hb", id: myId, meta: myPresence } });
+  }
+  function flushPush() {
+    if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
+    lastPush = now();
+    const s = pendingShared; pendingShared = null; if (!s || !client) return;
+    client.from("rooms").upsert({ id: room, state: s, updated_at: new Date().toISOString() })
+      .then(({ error }) => { if (error) console.warn("[deskovania] room save:", error.message); });
   }
 
   return {
@@ -104,9 +113,11 @@ export function makeSupabaseNet(myId, room) {
 
     pushShared(shared) {
       if (!client) return;
-      client.from("rooms")
-        .upsert({ id: room, state: shared, updated_at: new Date().toISOString() })
-        .then(({ error }) => { if (error) console.warn("[deskovania] room save:", error.message); });
+      // coalesce bursts of upserts to ~2/s (each is a full-state REST write)
+      pendingShared = shared;
+      const t = now(), since = t - lastPush;
+      if (since >= 450) flushPush();
+      else if (!pushTimer) pushTimer = setTimeout(flushPush, 450 - since);
     },
 
     onShared(cb) { sharedCb = cb; },
@@ -114,14 +125,13 @@ export function makeSupabaseNet(myId, room) {
     setPresence(p) {
       myPresence = { id: myId, ...p };
       const t = now();
-      // throttle: track presence AND broadcast a heartbeat (either path lets
-      // peers find us; broadcast works even when presence sync doesn't)
-      if (channel && t - lastPresenceSent > 500) {
-        if (lastPresenceSent === 0) log("first presence.track + heartbeat for", myId.slice(0, 6));
-        lastPresenceSent = t;
-        channel.track(myPresence);
-        sendHeartbeat();
+      // fast, cheap: broadcast a position heartbeat often so peers move smoothly
+      if (channel && t - lastHb > 140) {
+        if (lastHb === 0) log("first heartbeat for", myId.slice(0, 6));
+        lastHb = t; sendHeartbeat();
       }
+      // slower: track full presence for the roster (the CRDT sync is heavier)
+      if (channel && t - lastPresenceSent > 1000) { lastPresenceSent = t; channel.track(myPresence); }
     },
 
     onPeers(cb) { peersCb = cb; },

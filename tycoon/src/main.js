@@ -59,7 +59,7 @@ async function boot() {
   setInterval(() => tickEconomy(), ECON_TICK_MS);
   setInterval(() => flushShared(false), 2500);
   setInterval(() => { if (state.meDirty) saveMe(); }, 3000);
-  setInterval(() => net.setPresence(myPresence()), TUNING.heartbeatMs);
+  setInterval(() => net.setPresence(myPresence()), 150);   // fast position heartbeat (adapter throttles the heavy parts)
   net.setPresence(myPresence());
   window.addEventListener("beforeunload", () => saveMe());
 }
