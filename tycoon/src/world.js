@@ -270,6 +270,7 @@ function doAttack() {
   if (best.kind === "mon") {
     const r = hitMonster(best.id);
     if (r.killed) onTileMessage("Killed " + best.name + "! +" + r.coins + "¢ — your " + wname + " broke.");
+    else if (r.woke) onTileMessage("😾 The rat woke up and is hunting again! Your " + wname + " broke.");
     else if (r.blocked) onTileMessage("Struck " + best.name + " — its armor held" + (r.king ? " (♥" + r.guard + " left)" : "") + ". " + wname + " broke.");
   } else if (best.kind === "bot") {
     const r = killCharlie(best.ref.x, best.ref.y);

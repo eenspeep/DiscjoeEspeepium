@@ -448,6 +448,7 @@ export function applyOp(s, op) {
     }
     case "loot+": addLootTo(s, op.key, op.types); break;
     case "monster-": if (s.monsters) delete s.monsters[op.id]; break;
+    case "monsterWake": { const m = s.monsters && s.monsters[op.id]; if (m) { m.tired = false; m.attacks = 0; m.wt = null; m.cool = 0; } break; }
     case "monsterGuard": { const m = s.monsters && s.monsters[op.id]; if (m) { m.guard = op.guard; if (op.armorKey) { addLootTo(s, op.armorKey, [op.armorType]); m.armor = null; } } break; }
     case "potInvest": { const p = s.pot; if (p) { p.balance = round2(p.balance + op.amt); p.contributions[op.pid] = round2((p.contributions[op.pid] || 0) + op.amt); } break; }
     case "potVote": { if (s.pot) s.pot.votes[op.pid] = op.proposal; break; }
@@ -1008,6 +1009,11 @@ export function tryRepairFurniture(key) {
 export function hitMonster(id) {
   const s = state.shared, m = s.monsters && s.monsters[id]; if (!m) return { ok: false };
   const key = Math.round(m.x) + "," + Math.round(m.y);
+  // a worn-down (tired) rat can startle awake instead of taking the blow
+  if (m.kind === "rat" && m.tired && Math.random() < TUNING.ratWakeChance) {
+    sharedOp({ t: "monsterWake", id }); commit();
+    return { ok: true, woke: true };
+  }
   if (m.guard > 0) {
     const newGuard = m.guard - 1, dropsArmor = m.kind === "rat" && m.armor;
     sharedOp({ t: "monsterGuard", id, guard: newGuard, armorKey: dropsArmor ? key : undefined, armorType: dropsArmor ? m.armor : undefined });
