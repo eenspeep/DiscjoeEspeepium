@@ -7,7 +7,7 @@ import { connectNet } from "./net/net.js";
 import { state, initState, tickEconomy, flushShared, saveMe, setAccount, adoptProfile, setProfileSaver, receiveAttack, applyKillReward, setMonsterSender, receiveMonsterHit } from "./state.js";
 import { hasSupabase, currentUser, signIn, signUp, signOut, loadProfile, saveProfile, onProfileError } from "./account.js";
 import { initWorld, myPresence, applyPush } from "./world.js";
-import { initUI, openFurniture, openSite, openDoor, flash, showOffline } from "./ui.js";
+import { initUI, openFurniture, openSite, openDoor, openWall, flash, showOffline } from "./ui.js";
 
 async function applyAuthed(acc) {
   setAccount(acc);
@@ -34,7 +34,7 @@ async function boot() {
   }
 
   initWorld(document.getElementById("stage"), {
-    onFurnitureClick: openFurniture, onSiteClick: openSite, onDoorClick: openDoor, onTileMessage: flash,
+    onFurnitureClick: openFurniture, onSiteClick: openSite, onDoorClick: openDoor, onWallClick: openWall, onTileMessage: flash,
     send: (msg) => net.send && net.send(msg),
   });
   initUI({ enabled: hasSupabase(), signIn, signUp, applyAuthed, doLogout });

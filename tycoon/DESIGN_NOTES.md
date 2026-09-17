@@ -4,6 +4,29 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Jump + wall decor — SHIPPED
+**Jump.** Space (or the Jump button, also for touch) hops the Joey on a short
+arc. If the guard is off cooldown the hop also grants `jumpInvulnMs` (1s) of
+kill-immunity, then starts a `jumpCooldownMs` (60s) cooldown; hopping while on
+cooldown still animates but grants nothing. `receiveAttack`/`receiveMonsterHit`
+short-circuit to a harmless dodge while `isInvulnerable()`, checked on the
+victim's own client. Jump state (`state.jumpAt`, `invulnUntil`, `jumpCdUntil`)
+is ephemeral, not saved. A golden pulsing ring shows during immunity; the sprite
+rises via a new `lift` draw option while its shadow stays grounded.
+
+**Wall decor.** There is still no gameplay z-axis — height is faked in the
+renderer. Wall decor rides on that: pieces hang on a wall edge `(gx,gy,side)`
+where `side` is "W" (up-left) or "N" (up-right) and the neighbor across it is
+void (same edges `drawBackWalls` draws). Stored in `shared.walls`, placed
+instantly (no build site) via a `buildWall` hold-mode that highlights the wall
+edge nearest the cursor within reach. `WALL_DECOR` catalog (poster, clock,
+dartboard, sconce, painting, wall TV, neon), unlocked by research tier, bought
+through a new Shop "Wall Decor" section, sold via a small inspector (`openWall`).
+**Cosmetic only for now** — they don't feed income; wiring them into the
+adjacency economy is a later step if wanted. Rendered as small framed pieces in
+the depth-sorted pass (depth `gx+gy-0.4`, so they sit behind the tile's
+occupants).
+
 ## 2026-09-17 — Toast de-dupe (no bubble spam) — SHIPPED
 `flash()` now keeps one toast per distinct message. A repeat of a message that's
 already showing (spam-clicking Enzo for "🐱 Enzo blesses you (+1¢)") shakes the

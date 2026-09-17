@@ -10,21 +10,24 @@ import {
   walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
   attackRangeFor, interactRange, buildRange, sizeMult, withinReach,
   enzoCells, isEnzoTile, enzoAnchor, hasLeash, petActive,
+  WALL_DECOR, wallIsReal,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
 let buildMod = null;    // node-mod type being placed
 let buildDoor = false;  // placing a door
+let buildWall = null;   // wall-decor type being hung
 let buildRot = 0;       // rotation (0..3) for furniture placement
 let enzoClickT = -9;    // last Enzo-click time, for the click pulse
 const ZMIN = 0.5, ZMAX = 2.6;   // in-game zoom range (pinch / wheel / buttons)
 let onFurnitureClick = () => {};
 let onSiteClick = () => {};
 let onDoorClick = () => {};
+let onWallClick = () => {};
 let onTileMessage = () => {};
 let sendMsg = null;
 const unlockedDoors = new Set();   // doors I've unlocked this session
@@ -45,6 +48,7 @@ export function initWorld(canvasEl, hooks = {}) {
   onFurnitureClick = hooks.onFurnitureClick || onFurnitureClick;
   onSiteClick = hooks.onSiteClick || onSiteClick;
   onDoorClick = hooks.onDoorClick || onDoorClick;
+  onWallClick = hooks.onWallClick || onWallClick;
   onTileMessage = hooks.onTileMessage || onTileMessage;
   sendMsg = hooks.send || null;
 
@@ -114,12 +118,14 @@ export function initWorld(canvasEl, hooks = {}) {
   requestAnimationFrame(loop);
 }
 
-export function setBuild(type) { buildType = type; buildMod = null; buildDoor = false; }
+export function setBuild(type) { buildType = type; buildMod = null; buildDoor = false; buildWall = null; }
 export function getBuild() { return buildType; }
-export function setBuildMod(type) { buildMod = type; buildType = null; buildDoor = false; }
+export function setBuildMod(type) { buildMod = type; buildType = null; buildDoor = false; buildWall = null; }
 export function getBuildMod() { return buildMod; }
-export function setBuildDoor(on) { buildDoor = on; buildType = null; buildMod = null; }
+export function setBuildDoor(on) { buildDoor = on; buildType = null; buildMod = null; buildWall = null; }
 export function getBuildDoor() { return buildDoor; }
+export function setBuildWall(type) { buildWall = type; buildType = null; buildMod = null; buildDoor = false; }
+export function getBuildWall() { return buildWall; }
 export function setSelected(key) { selectedKey = key; }
 
 function resize() {
@@ -144,12 +150,21 @@ function onClick() {
     }
     return;
   }
+  if (buildWall) {
+    const edge = nearestWallEdge();
+    if (!edge) return onTileMessage("Aim at a wall within reach to hang it.");
+    const r = tryPlaceWall(buildWall, edge.gx, edge.gy, edge.side);
+    onTileMessage(r.ok ? "Hung on the wall." : (r.why || "Can't hang it there."));
+    return;
+  }
   if (buildDoor) {
     const r = tryPlaceDoor(gx, gy);
     onTileMessage(r.ok ? "Door installed. Click it to lock it." : (r.why || "Can't place a door there."));
     return;
   }
   if (state.shared.doors[doorKey]) { onDoorClick(doorKey, state.shared.doors[doorKey]); return; }
+  const wallHit = pickWallDecor();   // click a hung piece to take it down
+  if (wallHit) { onWallClick(wallHit.key, state.shared.walls[wallHit.key]); return; }
   if (buildMod) {
     const f = fKey && state.shared.furniture[fKey];
     if (!f) return onTileMessage("Put mods on a furniture surface.");
@@ -459,6 +474,10 @@ function draw(t) {
     const [lx, ly] = key.split(",").map(Number);
     items.push({ depth: lx + ly - 0.03, kind: "loot", lx, ly, pile });
   }
+  for (const [key, w] of Object.entries(s.walls || {})) {
+    const [wx, wy, side] = key.split(","); const gx = wx | 0, gy = wy | 0;
+    items.push({ depth: gx + gy - 0.4, kind: "wall", gx, gy, side, w });   // sits behind the tile's occupants
+  }
   const eCells = enzoCells(s);
   items.push({ depth: cellsDepth(eCells) + 0.2, kind: "enzo", cells: eCells });
   items.push({ depth: state.me.pos.x + state.me.pos.y, kind: "me" });
@@ -477,6 +496,19 @@ function draw(t) {
     else if (it.kind === "peer") drawPeer(it.r, t);
     else if (it.kind === "npc") drawPeer(it.n, t, true);
     else if (it.kind === "mon") drawMonster(it.r);
+    else if (it.kind === "wall") drawWall(it.gx, it.gy, it.side, it.w);
+  }
+
+  // holding a wall piece: highlight the wall edge the cursor is nearest
+  if (state.me.created && buildWall && mouse.over) {
+    const edge = nearestWallEdge();
+    if (edge) {
+      const c = wallFaceCenter(edge.gx, edge.gy, edge.side), Z = camera.zoom, s = 9 * Z;
+      ctx.strokeStyle = "rgba(70,200,130,0.95)"; ctx.lineWidth = 2 * Z;
+      ctx.strokeRect(c.x - s, c.y - s, s * 2, s * 2);
+      const def = WALL_DECOR[buildWall];
+      if (def) { ctx.globalAlpha = 0.7; ctx.font = `${12 * Z}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle"; ctx.fillText(def.glyph, c.x, c.y); ctx.globalAlpha = 1; }
+    }
   }
 }
 
@@ -609,6 +641,50 @@ function drawTile(gx, gy, fill) {
   ctx.closePath();
   ctx.fillStyle = fill; ctx.fill();
   ctx.strokeStyle = "rgba(120,130,150,0.25)"; ctx.lineWidth = 1; ctx.stroke();
+}
+
+// ---- wall decor -----------------------------------------------------------
+const WALL_Z = 15;   // wall height in design px (matches drawBackWalls)
+// Screen center of a tile's wall face on the given side ("W" up-left, "N" up-right).
+function wallFaceCenter(gx, gy, side) {
+  const c = tileCorners(gx, gy), WZ = WALL_Z * camera.zoom;
+  const a = side === "W" ? c.L : c.T, b = side === "W" ? c.T : c.R;
+  return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 - WZ * 0.55 };
+}
+// The empty wall edge nearest the cursor, among walls the player can reach.
+function nearestWallEdge() {
+  const me = state.me, s = state.shared, R = interactRange(me);
+  const px = Math.round(me.pos.x), py = Math.round(me.pos.y);
+  let best = null, bd = Infinity;
+  for (let dx = -R; dx <= R; dx++) for (let dy = -R; dy <= R; dy++) {
+    const gx = px + dx, gy = py + dy;
+    for (const side of ["W", "N"]) {
+      if (!wallIsReal(s, gx, gy, side) || (s.walls && s.walls[gx + "," + gy + "," + side])) continue;
+      const c = wallFaceCenter(gx, gy, side), d = Math.hypot(c.x - mouse.sx, c.y - mouse.sy);
+      if (d < bd) { bd = d; best = { gx, gy, side }; }
+    }
+  }
+  return best;
+}
+// A hung piece near the cursor and within reach (for selecting/taking down).
+function pickWallDecor() {
+  const s = state.shared; if (!s.walls) return null;
+  let best = null, bd = 22 * camera.zoom;
+  for (const key of Object.keys(s.walls)) {
+    const [gx, gy, side] = [key.split(",")[0] | 0, key.split(",")[1] | 0, key.split(",")[2]];
+    if (!withinReach(state.me, gx, gy)) continue;
+    const c = wallFaceCenter(gx, gy, side), d = Math.hypot(c.x - mouse.sx, c.y - mouse.sy);
+    if (d < bd) { bd = d; best = { key, gx, gy, side }; }
+  }
+  return best;
+}
+function drawWall(gx, gy, side, w) {
+  const def = WALL_DECOR[w.type]; if (!def) return;
+  const c = wallFaceCenter(gx, gy, side), Z = camera.zoom, s = 8 * Z;
+  ctx.fillStyle = shade(def.color, -28); rrect(ctx, c.x - s - 1 * Z, c.y - s - 1 * Z, (s + 1 * Z) * 2, (s + 1 * Z) * 2, 2 * Z);   // frame
+  ctx.fillStyle = shade(def.color, 30); rrect(ctx, c.x - s, c.y - s, s * 2, s * 2, 1.5 * Z);   // mat
+  ctx.font = `${12 * Z}px system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(def.glyph, c.x, c.y + 0.5 * Z);
 }
 
 const TAG_TINT = { brain: "#4b56b8", build: "#c9772f", neutral: "#7f8794" };
