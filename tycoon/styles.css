@@ -238,6 +238,14 @@ body {
   transition: opacity 0.25s ease, transform 0.25s ease;
 }
 .toast-item.show { opacity: 1; transform: translateY(0); }
+@keyframes toast-shake {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  20% { transform: translateY(0) translateX(-5px); }
+  40% { transform: translateY(0) translateX(5px); }
+  60% { transform: translateY(0) translateX(-3px); }
+  80% { transform: translateY(0) translateX(3px); }
+}
+.toast-item.shake { animation: toast-shake 0.32s ease; }
 
 .modal-back {
   position: fixed; inset: 0;
