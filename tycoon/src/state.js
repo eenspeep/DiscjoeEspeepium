@@ -167,7 +167,28 @@ function freeTileNear(gx, gy) {
     }
   return { x: gx, y: gy };
 }
-function centerMe() { const r0 = state.shared.rooms[0]; state.me.pos = freeTileNear(r0.x + Math.floor(r0.w / 2), r0.y + Math.floor(r0.h / 2)); }
+// A spawn/unstick spot: a free tile in a ring AROUND the office center (never the
+// center itself, which is the Enzo statue), randomized and avoiding other Joeys
+// so people don't all land on one tile and wedge each other. Falls back outward.
+function spawnSpot() {
+  const s = state.shared, blocked = blockedTiles(s), ents = entityTiles(), r0 = s.rooms[0];
+  const cx = r0.x + Math.floor(r0.w / 2), cy = r0.y + Math.floor(r0.h / 2);
+  const ok = (x, y) => isWalkable(s, x, y) && !blocked.has(x + "," + y) && !(s.doors && s.doors[x + "," + y]);
+  for (let r = 1; r < 40; r++) {
+    const ring = [];
+    for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;   // ring edge only
+      const x = cx + dx, y = cy + dy;
+      if (ok(x, y)) ring.push([x, y]);
+    }
+    for (let i = ring.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [ring[i], ring[j]] = [ring[j], ring[i]]; }
+    const free = ring.find(([x, y]) => !ents.has(x + "," + y));   // prefer a tile nobody's on
+    if (free) return { x: free[0], y: free[1] };
+    if (ring.length) return { x: ring[0][0], y: ring[0][1] };     // ring is walkable but crowded — still better than center
+  }
+  return freeTileNear(cx, cy);
+}
+function centerMe() { state.me.pos = spawnSpot(); }
 
 // "I'm wedged." Escape hatch: warp to a free floor tile at the office center
 // (spawn), which is always open. Personal only, no shared change.
