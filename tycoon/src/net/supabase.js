@@ -19,6 +19,9 @@ export function makeSupabaseNet(myId, room) {
   let myPresence = null;
   let lastPresenceSent = 0;
 
+  const DBG = typeof location !== "undefined" && /joenet|debug/i.test(location.search + location.hash);
+  function log(...a) { if (DBG) console.info("[joenet]", ...a); }
+
   function emitPeers() {
     if (!channel) return;
     const state = channel.presenceState(); // { key: [meta, ...] }
@@ -28,6 +31,7 @@ export function makeSupabaseNet(myId, room) {
         if (m.id && m.id !== myId) arr.push(m);
       }
     }
+    log("presence keys:", Object.keys(state).length, "→ peers:", arr.length, "(me:", myId.slice(0, 6) + ")");
     peersCb(arr);
   }
 
@@ -58,6 +62,7 @@ export function makeSupabaseNet(myId, room) {
 
       await new Promise((resolve, reject) => {
         channel.subscribe((status, err) => {
+          log("subscribe status:", status, err ? ("err: " + (err.message || err)) : "");
           if (status === "SUBSCRIBED") {
             if (myPresence) channel.track(myPresence);
             resolve();
@@ -66,6 +71,7 @@ export function makeSupabaseNet(myId, room) {
           }
         });
       });
+      if (typeof window !== "undefined") window.__joenet = { channel: () => channel, presence: () => channel && channel.presenceState(), myId };
     },
 
     async getInitialShared() {
@@ -94,6 +100,7 @@ export function makeSupabaseNet(myId, room) {
       const t = now();
       // throttle: presence.track is cheap but no need to spam every frame
       if (channel && t - lastPresenceSent > 120) {
+        if (lastPresenceSent === 0) log("first presence.track for", myId.slice(0, 6));
         lastPresenceSent = t;
         channel.track(myPresence);
       }
