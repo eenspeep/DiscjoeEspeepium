@@ -15,7 +15,7 @@ export function getSupabase() {
     clientPromise = import(/* @vite-ignore */ CDN).then(({ createClient }) =>
       createClient(SUPABASE.url, SUPABASE.anonKey, {
         auth: { persistSession: true, autoRefreshToken: true },
-        realtime: { params: { eventsPerSecond: 10 } },
+        realtime: { params: { eventsPerSecond: 40 } },
       })
     );
   }

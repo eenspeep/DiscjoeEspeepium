@@ -262,6 +262,7 @@ export function tickEconomy() {
       buildTick(dt);
     }
     me.lastSeen = t;
+    if (t - lastContribFlush > 750) { lastContribFlush = t; flushContrib(); }   // batch build/research to the host
     claimOwed();
   }
   potTick(t);
@@ -278,7 +279,7 @@ function buildTick(dt) {
   for (const [key, site] of Object.entries(s.sites || {})) {
     const [gx, gy] = key.split(",").map(Number);
     if (!isNearFootprint(me.pos, site.type, gx, gy, bReach)) continue;
-    sharedOp({ t: "progBy", key, pid: me.id, work: round2(power * dt) });   // my build contribution
+    contribute(key, round2(power * dt));   // my build contribution (batched to the host)
     // only the host turns a finished site into furniture (single authority)
     if (state.isHost && siteProgress(site) >= site.work) {
       if (!s.furniture[key]) s.furniture[key] = { type: site.type, level: 1, by: Object.keys(site.progBy || {}), rot: site.rot || 0, paidBy: site.paidBy || null };
@@ -289,7 +290,7 @@ function buildTick(dt) {
   }
 
   const rp = rpRate(me, s) * dt * (1 + 0.2 * traitVal(me, "researchWeight"));   // "Research weight" trait
-  if (rp > 0) sharedOp({ t: "contrib", pid: me.id, rp: round2(rp) });
+  if (rp > 0) contributeRp(round2(rp));
 
   const q = me.buildQueue;
   if (q && q.length) {
@@ -362,6 +363,12 @@ export function applyOp(s, op) {
     case "owed-": if (s.owed) delete s.owed[op.pid]; break;
     case "contrib": { s.research = s.research || { contrib: {} }; s.research.contrib = s.research.contrib || {}; s.research.contrib[op.pid] = round2((s.research.contrib[op.pid] || 0) + op.rp); break; }
     case "progBy": { const st = s.sites[op.key]; if (st) { st.progBy = st.progBy || {}; st.progBy[op.pid] = round2((st.progBy[op.pid] || 0) + op.work); } break; }
+    case "contribBatch": {   // one message carrying a tick or two of build progress + research
+      s.research = s.research || { contrib: {} }; s.research.contrib = s.research.contrib || {};
+      if (op.rp) s.research.contrib[op.pid] = round2((s.research.contrib[op.pid] || 0) + op.rp);
+      for (const k in (op.prog || {})) { const st = s.sites[k]; if (st) { st.progBy = st.progBy || {}; st.progBy[op.pid] = round2((st.progBy[op.pid] || 0) + op.prog[k]); } }
+      break;
+    }
     case "loot+": addLootTo(s, op.key, op.types); break;
     case "monster-": if (s.monsters) delete s.monsters[op.id]; break;
     case "monsterGuard": { const m = s.monsters && s.monsters[op.id]; if (m) { m.guard = op.guard; if (op.armorKey) { addLootTo(s, op.armorKey, [op.armorType]); m.armor = null; } } break; }
@@ -380,6 +387,27 @@ export function hostApplyOp(op) {
   if (op.t === "spawnRat") spawnRat(op.x, op.y);
   else applyOp(state.shared, op);
   state.dirty = true; flushShared(true); notify();
+}
+
+// Build progress + research happen every tick. Applying locally is cheap, but a
+// non-host must NOT send one message per tick (Supabase caps events/sec). So we
+// apply optimistically and batch the network side, flushed ~1.3×/s.
+const pendingProg = {}; let pendingRp = 0; let lastContribFlush = 0;
+function contribute(key, work) {
+  applyOp(state.shared, { t: "progBy", key, pid: state.me.id, work });
+  if (state.isHost) state.dirty = true; else pendingProg[key] = round2((pendingProg[key] || 0) + work);
+}
+function contributeRp(rp) {
+  applyOp(state.shared, { t: "contrib", pid: state.me.id, rp });
+  if (state.isHost) state.dirty = true; else pendingRp = round2(pendingRp + rp);
+}
+function flushContrib() {
+  if (state.isHost) return;
+  const keys = Object.keys(pendingProg);
+  if (!keys.length && pendingRp <= 0) return;
+  netSend({ type: "__op", op: { t: "contribBatch", pid: state.me.id, prog: { ...pendingProg }, rp: pendingRp }, from: state.me.id });
+  for (const k of keys) delete pendingProg[k];
+  pendingRp = 0;
 }
 
 // ---- economy actions ------------------------------------------------------

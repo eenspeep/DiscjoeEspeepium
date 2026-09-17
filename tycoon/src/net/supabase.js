@@ -22,6 +22,7 @@ export function makeSupabaseNet(myId, room) {
   let pushTimer = null, pendingShared = null, lastPush = 0;
   const hbPeers = new Map();   // id -> { meta, t } from broadcast heartbeats
   const PEER_TTL = 6000;
+  const stats = { sub: "-", out: 0, hbIn: 0, opIn: 0, sharedIn: 0, lastSharedT: 0, peers: 0 };
 
   const DBG = typeof location !== "undefined" && /joenet|debug/i.test(location.search + location.hash);
   function log(...a) { if (DBG) console.info("[joenet]", ...a); }
@@ -38,18 +39,18 @@ export function makeSupabaseNet(myId, room) {
     const cutoff = now() - PEER_TTL;
     for (const [id, e] of hbPeers) { if (e.t < cutoff) hbPeers.delete(id); else if (id !== myId) map.set(id, e.meta); }
     const arr = [...map.values()];
-    log("peers:", arr.length, "(presence keys:", channel ? Object.keys(channel.presenceState()).length : 0, "hb:", hbPeers.size, ")");
+    stats.peers = arr.length;
     peersCb(arr);
   }
   function sendHeartbeat() {
-    if (channel && myPresence) channel.send({ type: "broadcast", event: "msg", payload: { type: "__hb", id: myId, meta: myPresence } });
+    if (channel && myPresence) { channel.send({ type: "broadcast", event: "msg", payload: { type: "__hb", id: myId, meta: myPresence } }); stats.out++; }
   }
   function flushPush() {
     if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
     lastPush = now();
     const s = pendingShared; pendingShared = null; if (!s || !client) return;
     // live sync over broadcast (works without the rooms Postgres-changes feed)
-    if (channel) channel.send({ type: "broadcast", event: "msg", payload: { type: "__shared", from: myId, state: s } });
+    if (channel) { channel.send({ type: "broadcast", event: "msg", payload: { type: "__shared", from: myId, state: s } }); stats.out++; }
     // and persist to the table so a fresh join / reload can load the latest
     client.from("rooms").upsert({ id: room, state: s, updated_at: new Date().toISOString() })
       .then(({ error }) => { if (error) console.warn("[deskovania] room save:", error.message); });
@@ -81,18 +82,20 @@ export function makeSupabaseNet(myId, room) {
         .on("broadcast", { event: "msg" }, (p) => {
           const m = p && p.payload; if (!m) return;
           if (m.type === "__hb") {   // peer heartbeat, not a game message
-            if (m.id && m.id !== myId) { hbPeers.set(m.id, { meta: m.meta || { id: m.id }, t: now() }); emitPeers(); }
+            if (m.id && m.id !== myId) { stats.hbIn++; hbPeers.set(m.id, { meta: m.meta || { id: m.id }, t: now() }); emitPeers(); }
             return;
           }
           if (m.type === "__shared") {   // shared office state, over broadcast (no DB feed needed)
-            if (m.from !== myId && m.state) { log("recv shared from", (m.from || "?").slice(0, 6)); sharedCb(m.state); }
+            if (m.from !== myId && m.state) { stats.sharedIn++; stats.lastSharedT = now(); sharedCb(m.state); }
             return;
           }
+          if (m.type === "__op" && m.from !== myId) stats.opIn++;
           msgCb(m);
         });
 
       await new Promise((resolve, reject) => {
         channel.subscribe((status, err) => {
+          stats.sub = status;
           log("subscribe status:", status, err ? ("err: " + (err.message || err)) : "");
           if (status === "SUBSCRIBED") {
             if (myPresence) { channel.track(myPresence); sendHeartbeat(); }
@@ -103,7 +106,7 @@ export function makeSupabaseNet(myId, room) {
         });
       });
       setInterval(emitPeers, 2000);   // prune stale heartbeat peers
-      if (typeof window !== "undefined") window.__joenet = { channel: () => channel, presence: () => channel && channel.presenceState(), hb: () => [...hbPeers.keys()], myId };
+      if (typeof window !== "undefined") window.__joenet = { channel: () => channel, presence: () => channel && channel.presenceState(), hb: () => [...hbPeers.keys()], stats, myId };
     },
 
     async getInitialShared() {
@@ -132,8 +135,8 @@ export function makeSupabaseNet(myId, room) {
     setPresence(p) {
       myPresence = { id: myId, ...p };
       const t = now();
-      // fast, cheap: broadcast a position heartbeat often so peers move smoothly
-      if (channel && t - lastHb > 140) {
+      // broadcast a position heartbeat a few times a second so peers move smoothly
+      if (channel && t - lastHb > 250) {
         if (lastHb === 0) log("first heartbeat for", myId.slice(0, 6));
         lastHb = t; sendHeartbeat();
       }
@@ -143,7 +146,8 @@ export function makeSupabaseNet(myId, room) {
 
     onPeers(cb) { peersCb = cb; },
 
-    send(payload) { if (channel) channel.send({ type: "broadcast", event: "msg", payload }); },
+    send(payload) { if (channel) { channel.send({ type: "broadcast", event: "msg", payload }); stats.out++; } },
     onMessage(cb) { msgCb = cb; },
+    stats() { return stats; },
   };
 }

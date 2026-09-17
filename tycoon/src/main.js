@@ -61,9 +61,23 @@ async function boot() {
   setInterval(() => tickEconomy(), ECON_TICK_MS);
   setInterval(() => flushShared(false), 2500);
   setInterval(() => { if (state.meDirty) saveMe(); }, 3000);
-  setInterval(() => net.setPresence(myPresence()), 150);   // fast position heartbeat (adapter throttles the heavy parts)
+  setInterval(() => net.setPresence(myPresence()), 200);   // position heartbeat (adapter throttles the heavy parts)
   net.setPresence(myPresence());
   window.addEventListener("beforeunload", () => saveMe());
+
+  // On ?joenet, show a live netcode readout on screen so problems are visible.
+  if (/joenet|debug/i.test(location.search + location.hash)) {
+    const box = document.createElement("div");
+    box.style.cssText = "position:fixed;left:8px;bottom:8px;z-index:60;background:rgba(16,18,24,.86);color:#cfe;font:11px/1.5 monospace;padding:8px 10px;border-radius:8px;white-space:pre;pointer-events:none";
+    document.body.appendChild(box);
+    setInterval(() => {
+      const s = net.stats ? net.stats() : null;
+      const ago = s && s.lastSharedT ? Math.round((Date.now() - s.lastSharedT) / 1000) + "s" : "never";
+      box.textContent = s
+        ? `net ${net.mode}  ${state.isHost ? "HOST" : "guest"}  sub:${s.sub}\npeers:${s.peers}  hbIn:${s.hbIn}  opIn:${s.opIn}\nsharedIn:${s.sharedIn} (${ago})  out:${s.out}`
+        : `net ${net.mode}  ${state.isHost ? "HOST" : "guest"}  peers:${state.peers.length}`;
+    }, 500);
+  }
 }
 
 boot().catch((err) => {
