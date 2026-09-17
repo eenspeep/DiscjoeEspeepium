@@ -916,6 +916,20 @@ export function killCharlie(cx, cy) {
   return { ok: true, bounty };
 }
 
+// Charlie catches a rat in a protected room (pest control). Host-only mutation;
+// the rat just vanishes, dropping its armor if it had any. Called by world.js
+// when the host's Charlie reaches a protected-room rat.
+export function charlieEatRat(id) {
+  if (!state.isHost) return { ok: false };
+  const s = state.shared, m = s.monsters && s.monsters[id];
+  if (!m || m.kind !== "rat") return { ok: false };
+  const key = Math.round(m.x) + "," + Math.round(m.y);
+  if (m.armored && m.armor) addLoot(key, [m.armor]);
+  sharedOp({ t: "monster-", id });
+  state.dirty = true;
+  return { ok: true };
+}
+
 let lastCharlie = 0;
 function charlieBuyInterval() { return TUNING.charlieBuyMinMs + Math.random() * (TUNING.charlieBuyMaxMs - TUNING.charlieBuyMinMs); }
 // Gear Charlie can wear: any equippable, buyable, unlocked item with a body slot.
