@@ -48,6 +48,9 @@ export function makeSupabaseNet(myId, room) {
     if (pushTimer) { clearTimeout(pushTimer); pushTimer = null; }
     lastPush = now();
     const s = pendingShared; pendingShared = null; if (!s || !client) return;
+    // live sync over broadcast (works without the rooms Postgres-changes feed)
+    if (channel) channel.send({ type: "broadcast", event: "msg", payload: { type: "__shared", from: myId, state: s } });
+    // and persist to the table so a fresh join / reload can load the latest
     client.from("rooms").upsert({ id: room, state: s, updated_at: new Date().toISOString() })
       .then(({ error }) => { if (error) console.warn("[deskovania] room save:", error.message); });
   }
@@ -79,6 +82,10 @@ export function makeSupabaseNet(myId, room) {
           const m = p && p.payload; if (!m) return;
           if (m.type === "__hb") {   // peer heartbeat, not a game message
             if (m.id && m.id !== myId) { hbPeers.set(m.id, { meta: m.meta || { id: m.id }, t: now() }); emitPeers(); }
+            return;
+          }
+          if (m.type === "__shared") {   // shared office state, over broadcast (no DB feed needed)
+            if (m.from !== myId && m.state) { log("recv shared from", (m.from || "?").slice(0, 6)); sharedCb(m.state); }
             return;
           }
           msgCb(m);
