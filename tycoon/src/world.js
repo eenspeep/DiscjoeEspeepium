@@ -10,12 +10,12 @@ import {
   walkableSet, isWalkable, inHall, doorPassable, equippedWeapon,
   attackRangeFor, interactRange, buildRange, sizeMult, withinReach,
   enzoCells, isEnzoTile, enzoAnchor, hasLeash, petActive,
-  WALL_DECOR, wallIsReal, gearWorn,
+  WALL_DECOR, wallIsReal, gearWorn, hasPower, powerList,
   isBuyableTile, tileFrontier, tileCost, canBuyTiles,
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick, tryTeleport } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
@@ -78,6 +78,15 @@ export function initWorld(canvasEl, hooks = {}) {
   });
   canvas.addEventListener("mouseleave", () => (mouse.over = false));
   canvas.addEventListener("click", onClick);
+  // right-click: Blink power teleports to the clicked tile (within range)
+  canvas.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (!hasPower(state.me, "blink")) return;
+    const r = canvas.getBoundingClientRect();
+    const g = screenToGrid((e.clientX - r.left) * dpr, (e.clientY - r.top) * dpr, canvas);
+    const res = tryTeleport(Math.round(g.gx), Math.round(g.gy));
+    if (res.ok) onTileMessage("✨ Blink!"); else if (res.why) onTileMessage(res.why);
+  });
   canvas.addEventListener("wheel", (e) => {
     e.preventDefault();
     camera.zoom = clamp(camera.zoom * (e.deltaY > 0 ? 0.92 : 1.08), ZMIN, ZMAX);
@@ -334,16 +343,17 @@ function updateMe(dt) {
   for (const [id, r] of renderPeers) entAt.set(Math.round(r.x) + "," + Math.round(r.y), { kind: "peer", id, x: r.x, y: r.y });
   for (const n of activeBots()) entAt.set(Math.round(n.x) + "," + Math.round(n.y), { kind: "bot", id: n.id, ref: n, x: n.x, y: n.y });
   const jumping = now() < (state.jumpPassUntil || 0);
+  const phasing = hasPower(state.me, "phase");   // Phasewalk: pass all furniture
   const solid = (gx, gy) => {
     const k = gx + "," + gy;
     if (!walk.has(k) || ents.has(k)) return true;   // void/wall and people always stop you
     const d = doors[k];
     if (d && !doorPassable(d, k, state.me.id, unlockedDoors)) return true;
     if (blocked.has(k)) {
-      // mid-jump you can glide through a single furniture/site piece (never Enzo)
-      if (jumping && !isEnzoTile(state.shared, gx, gy)) {
+      // glide through furniture/site (never Enzo): phase = always, jump = one piece
+      if ((jumping || phasing) && !isEnzoTile(state.shared, gx, gy)) {
         const fk = furnitureAnchorAt(state.shared, gx, gy) || siteAnchorAt(state.shared, gx, gy);
-        if (fk && (!state.jumpPassedKey || state.jumpPassedKey === fk)) return false;
+        if (fk && (phasing || !state.jumpPassedKey || state.jumpPassedKey === fk)) return false;
       }
       return true;
     }
@@ -1069,5 +1079,6 @@ export function myPresence() {
     x: state.me.pos.x, y: state.me.pos.y, moving: !!state.me.moving,
     specialty: state.me.specialty, size: state.me.created ? sizeMult(state.me) : 1,
     pet: state.me.created && petActive(state.me),
+    powers: state.me.created ? powerList(state.me) : [],
   };
 }

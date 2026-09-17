@@ -9,11 +9,12 @@ import {
   tryBuyItem, equipItem, unequipItem, moveItem, rotateItem, trySellItem,
   cancelSite, cancelBuild,
   tryLockDoor, tryUnlockDoor, tryRemoveDoor, checkDoorPassword,
-  tryBuyRatEgg, tryRepairFurniture, trySellWall,
+  tryBuyRatEgg, tryRepairFurniture, trySellWall, addAdjective,
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
-  roomCost, canAddRoom, tileCost, canBuyTiles, isProtected, roleOf, ROLE_META, goldPctOf, buildAddOf, researchAddOf, specRole, SPECIALTIES, ADJECTIVES, adjSummary, rollAdjectives, RARITY, STATS,
+  roomCost, canAddRoom, tileCost, canBuyTiles, isProtected, roleOf, ROLE_META, goldPctOf, buildAddOf, researchAddOf, specRole, SPECIALTIES, ADJECTIVES, adjByWord, adjSummary, rollAdjectives, RARITY, STATS,
+  joeLevel, adjectiveSlots, openAdjectiveSlots, nextLevelSoul, POWERS, powerList,
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
   furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
@@ -136,6 +137,7 @@ function renderHud() {
   hud.replaceChildren(
     el("div", { class: "hud-left" }, [
       el("div", { class: "coin" }, [el("span", { class: "coin-amt", text: fmt(me.credits || 0) }), el("span", { class: "coin-rate", text: "+" + fmt(income$()) + "/s" })]),
+      me.created ? nameBar(me) : null,
       me.created ? el("div", { class: "stat-chips" }, [
         el("span", { class: "schip brain", title: "BRAIN", text: STATS.brain.glyph + " " + me.stats.brain }),
         el("span", { class: "schip build", title: "BUILD", text: STATS.build.glyph + " " + me.stats.build }),
@@ -157,6 +159,62 @@ function renderHud() {
       el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · Space jump · Q attack (need a weapon in hand) · U unstick (warp to center) · walk into someone to shove them · click a 📦 to grab loot · stand by furniture to use it"), title: "Help" }, ["?"]),
     ])
   );
+}
+
+// Name bar: "JOEY" + each adjective colored by its rarity, in a scroll strip
+// that truncates (hover/drag to see the rest), plus a Joe Level chip that lights
+// up when you've levelled and can add another adjective.
+function nameBar(me) {
+  const words = me.adjectives || [];
+  const spans = [el("span", { class: "nb-joey", text: "JOEY" })];
+  for (const w of words) {
+    const adj = adjByWord(w), tint = adj ? RARITY[adj.rarity].tint : "#cfd6e4";
+    spans.push(el("span", { class: "nb-adj", style: "color:" + tint, title: adj ? (RARITY[adj.rarity].label + (adjSummary(adj) ? " · " + adjSummary(adj) : "")) : w, text: w }));
+  }
+  const open = openAdjectiveSlots(me), lvl = joeLevel(me);
+  const lvlChip = el("button", {
+    class: "nb-lvl" + (open > 0 ? " ready" : ""),
+    title: "Joe Level " + lvl + (open > 0 ? " · " + open + " name slot" + (open > 1 ? "s" : "") + " open — click to add an adjective" : " · channel SOUL to level up"),
+    onclick: () => { if (open > 0) openLevelUp(); },
+    text: "Lv " + lvl + (open > 0 ? " +" + open : ""),
+  });
+  return el("div", { class: "name-bar" }, [el("div", { class: "nb-scroll" }, spans), lvlChip]);
+}
+
+// Level-up: roll 3 adjectives (rarities weighted), pick one to append to your
+// name. Repeats while you still have open slots.
+function openLevelUp() {
+  const me = state.me;
+  if (openAdjectiveSlots(me) <= 0) return;
+  const existing = new Set(me.adjectives || []);
+  const state2 = { three: rollAdjectives(3, [...existing]), rerolls: 2 };
+  const back = el("div", { class: "modal-back" });
+  const render = () => {
+    const open = openAdjectiveSlots(me);
+    const cards = state2.three.map((a) => el("button", { class: "spec-card lvl-card", onclick: () => {
+      const r = addAdjective(a.word);
+      if (!r.ok) { flash(r.why || "Can't add that."); return; }
+      flash("✨ You are now " + r.name + "!");
+      if (openAdjectiveSlots(me) > 0) { state2.three = rollAdjectives(3, new Set(me.adjectives)); state2.rerolls = 2; draw(); }
+      else back.remove();
+    } }, [
+      el("div", { class: "spec-name", style: "color:" + RARITY[a.rarity].tint, text: a.word }),
+      el("div", { class: "spec-blurb muted small", text: RARITY[a.rarity].label }),
+      el("div", { class: "spec-start small", text: adjSummary(a) || "—" }),
+    ]));
+    return el("div", { class: "creator lvlup" }, [
+      el("h2", { text: "⭐ LEVEL UP — add a name" }),
+      el("p", { class: "muted small", text: "You have " + open + " open slot" + (open > 1 ? "s" : "") + ". Pick an adjective to bolt onto your name — its perks stack." }),
+      el("div", { class: "spec-row" }, cards),
+      el("div", { class: "panel-actions" }, [
+        el("button", { class: "btn" + (state2.rerolls > 0 ? "" : " poor"), onclick: () => { if (state2.rerolls <= 0) return; state2.rerolls--; state2.three = rollAdjectives(3, new Set(me.adjectives)); draw(); }, text: "🎲 Reroll (" + state2.rerolls + ")" }),
+        el("button", { class: "btn", onclick: () => back.remove(), text: "Later" }),
+      ]),
+    ]);
+  };
+  const draw = () => back.replaceChildren(render());
+  draw();
+  document.body.appendChild(back);
 }
 
 // ---- "in hand" bar (what you're about to place) ---------------------------
