@@ -44,6 +44,17 @@ export const TUNING = {
   tileGrowth: 1.012,            // each tile you own nudges the next one's price up
   maxTiles: 600,                // total bought tiles cap
 
+  // Conveyor belts: floor overlays that drift whoever/whatever is on them.
+  conveyCost: 120,
+  conveySpeed: 1.6,          // tiles/sec of drift along a belt
+  conveyLootMs: 550,         // how often loot piles hop one tile down a belt
+  // Traps: floor overlays that kill an entity that steps on them, with limited
+  // uses before disrepair (upgrade for more).
+  trapCost: 300,
+  trapUses: 3,               // uses before a trap breaks
+  trapUpgradeUses: 2,        // +uses per upgrade
+  trapTier: 2,               // research tier to unlock traps
+
   // Doors + password locks (gated behind research). Locks are expensive.
   doorTier: 3,
   doorCost: 500,

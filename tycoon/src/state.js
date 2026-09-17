@@ -243,7 +243,7 @@ function defaultShared() {
   furniture[`1,1`] = { type: "chair", level: 1, by: [] };
   furniture[`2,1`] = { type: "workbench", level: 1, by: [] };
   furniture[`1,2`] = { type: "snacktable", level: 1, by: [] };
-  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], tiles: {}, doors: {}, floor: { x: 0, y: 0, w, h }, furniture, walls: {}, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now(), gear: {} }, research: { contrib: {} }, pot: defaultPot() };
+  return { rooms: [{ x: 0, y: 0, w, h, protected: true }], halls: [], tiles: {}, doors: {}, convey: {}, traps: {}, floor: { x: 0, y: 0, w, h }, furniture, walls: {}, sites: {}, loot: {}, owed: {}, monsters: {}, charlie: { alive: true, diedAt: null, lastBuy: now(), gear: {} }, research: { contrib: {} }, pot: defaultPot() };
 }
 function healShared(s) {
   if (!s.rooms) { const w = (s.floor && s.floor.w) || 9, h = (s.floor && s.floor.h) || 9; s.rooms = [{ x: 0, y: 0, w, h }]; }
@@ -252,6 +252,8 @@ function healShared(s) {
   if (!s.halls) s.halls = [];
   if (!s.tiles) s.tiles = {};
   if (!s.doors) s.doors = {};
+  if (!s.convey) s.convey = {};
+  if (!s.traps) s.traps = {};
   if (!s.furniture) s.furniture = {};
   if (!s.walls) s.walls = {};
   if (!s.sites) s.sites = {};
@@ -347,6 +349,7 @@ export function tickEconomy() {
   charlieTick(t);
   monsterTick(t);
   repairTick(t);
+  conveyLootTick(t);
 }
 
 // Advance construction sites you're helping, research from BRAIN furniture, and
@@ -442,6 +445,12 @@ export function applyOp(s, op) {
     case "mod-": { const f = s.furniture[op.key]; if (f && f.mods) delete f.mods[op.mk]; break; }
     case "wall+": s.walls = s.walls || {}; s.walls[op.key] = op.val; break;
     case "wall-": if (s.walls) delete s.walls[op.key]; break;
+    case "convey+": s.convey = s.convey || {}; s.convey[op.key] = op.dir; break;
+    case "convey-": if (s.convey) delete s.convey[op.key]; break;
+    case "trap+": s.traps = s.traps || {}; s.traps[op.key] = op.val; break;
+    case "trap-": if (s.traps) delete s.traps[op.key]; break;
+    case "trapHit": { const tr = s.traps && s.traps[op.key]; if (tr) { tr.uses = Math.max(0, (tr.uses || 0) - 1); if (tr.uses <= 0) tr.broken = true; } break; }
+    case "trapUp": { const tr = s.traps && s.traps[op.key]; if (tr) { tr.max = op.max; tr.uses = op.uses; tr.broken = false; } break; }
     case "door+": s.doors[op.key] = op.val; break;
     case "door-": delete s.doors[op.key]; break;
     case "doorLock": { const d = s.doors[op.key]; if (d) { d.locked = op.locked; if ("hash" in op) d.hash = op.hash; } break; }
@@ -732,6 +741,92 @@ export function tryRemoveDoor(key) {
   const refund = Math.ceil(TUNING.doorCost * refundFrac(state.me) + (d.locked ? TUNING.lockCost * 0.3 : 0));
   sharedOp({ t: "door-", key }); state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
   return { ok: true, refund };
+}
+
+// ---- conveyor belts + traps (floor overlays) ------------------------------
+
+export const CONV_DIR = [[1, 0], [0, 1], [-1, 0], [0, -1]];   // dir index -> grid delta
+
+function overlayFree(s, gx, gy) {
+  const k = gx + "," + gy;
+  if (!isWalkable(s, gx, gy)) return "Belts and traps go on floor tiles.";
+  if (blockedTiles(s).has(k)) return "That tile is taken.";
+  if (s.doors && s.doors[k]) return "There's a door there.";
+  return null;
+}
+export function tryPlaceConvey(gx, gy, dir) {
+  const s = state.shared, key = gx + "," + gy;
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand next to the tile." };
+  if (s.traps && s.traps[key]) return { ok: false, why: "A trap is already there." };
+  const bad = overlayFree(s, gx, gy); if (bad && !s.convey[key]) return { ok: false, why: bad };
+  if (!s.convey[key] && state.me.credits < TUNING.conveyCost) return { ok: false, why: "Not enough credits (" + TUNING.conveyCost + ")." };
+  if (!s.convey[key]) spend(TUNING.conveyCost);          // re-aiming an existing belt is free
+  sharedOp({ t: "convey+", key, dir: ((dir % 4) + 4) % 4 }); commit();
+  return { ok: true };
+}
+export function tryRemoveConvey(key) {
+  const s = state.shared; if (!s.convey || s.convey[key] == null) return { ok: false };
+  const refund = Math.ceil(TUNING.conveyCost * refundFrac(state.me));
+  sharedOp({ t: "convey-", key }); state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
+  return { ok: true, refund };
+}
+export function tryPlaceTrap(gx, gy) {
+  const s = state.shared, key = gx + "," + gy;
+  if (currentTier(s) < TUNING.trapTier) return { ok: false, why: "Traps unlock at research Tier " + TUNING.trapTier + "." };
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand next to the tile." };
+  if (s.convey && s.convey[key]) return { ok: false, why: "A belt is already there." };
+  if (s.traps[key]) return { ok: false, why: "There's already a trap there." };
+  const bad = overlayFree(s, gx, gy); if (bad) return { ok: false, why: bad };
+  if (state.me.credits < TUNING.trapCost) return { ok: false, why: "Not enough credits (" + TUNING.trapCost + ")." };
+  spend(TUNING.trapCost);
+  sharedOp({ t: "trap+", key, val: { by: state.me.id, uses: TUNING.trapUses, max: TUNING.trapUses } });
+  commit();
+  return { ok: true };
+}
+export function tryUpgradeTrap(key) {
+  const s = state.shared, tr = s.traps && s.traps[key]; if (!tr) return { ok: false };
+  const cost = Math.ceil(TUNING.trapCost * 0.6);
+  if (state.me.credits < cost) return { ok: false, why: "Not enough credits (" + cost + ")." };
+  spend(cost);
+  const max = (tr.max || TUNING.trapUses) + TUNING.trapUpgradeUses;
+  sharedOp({ t: "trapUp", key, max, uses: max }); commit();   // upgrade also repairs it
+  return { ok: true, max };
+}
+export function tryRemoveTrap(key) {
+  const s = state.shared, tr = s.traps && s.traps[key]; if (!tr) return { ok: false };
+  const refund = Math.ceil(TUNING.trapCost * refundFrac(state.me));
+  sharedOp({ t: "trap-", key }); state.me.credits = round2(state.me.credits + refund); state.meDirty = true; commit();
+  return { ok: true, refund };
+}
+
+// Host: drift loot piles one tile down any belt they sit on.
+let lastConveyLoot = 0;
+function conveyLootTick(t) {
+  if (!state.isHost) return;
+  const s = state.shared; if (!s || !s.convey || !s.loot) return;
+  if (t - lastConveyLoot < TUNING.conveyLootMs) return; lastConveyLoot = t;
+  let moved = false;
+  for (const key of Object.keys(s.loot)) {
+    const dir = s.convey[key]; if (dir == null) continue;
+    const [dx, dy] = CONV_DIR[dir], [x, y] = key.split(",").map(Number), nk = (x + dx) + "," + (y + dy);
+    if (!isWalkable(s, x + dx, y + dy) || blockedTiles(s).has(nk)) continue;
+    const pile = s.loot[key], dest = s.loot[nk];
+    if (dest) dest.items.push(...pile.items); else s.loot[nk] = pile;
+    delete s.loot[key]; moved = true;
+  }
+  if (moved) state.dirty = true;   // full-state broadcast syncs the move
+}
+
+// A player/monster stepped on a trap: spring it (host-authoritative removal for
+// rats; players self-resolve). Returns true if the trap killed the stepper.
+export function trapAt(gx, gy) { const s = state.shared; return s.traps && s.traps[gx + "," + gy]; }
+export function springTrapOnMe(key) {
+  const s = state.shared, tr = s.traps && s.traps[key]; if (!tr || tr.broken || tr.uses <= 0) return false;
+  if (tr.by === state.me.id) return false;                 // your own traps don't bite you
+  if (isInvulnerable()) return false;
+  sharedOp({ t: "trapHit", key });                         // consume a use (syncs to host)
+  killMe("a trap");
+  return true;
 }
 
 // ---- combat ---------------------------------------------------------------
@@ -1215,6 +1310,11 @@ function monsterTick(t) {
   const mons = monsterList(); if (!mons.length) return;
   const targets = monsterTargets();
   for (const m of mons) {
+    const rk = Math.round(m.x) + "," + Math.round(m.y);
+    const tr = s.traps && s.traps[rk];                    // a trap underfoot springs and kills the rat
+    if (tr && !tr.broken && tr.uses > 0) { tr.uses = Math.max(0, tr.uses - 1); if (tr.uses <= 0) tr.broken = true; delete s.monsters[m.id]; state.dirty = true; continue; }
+    const cd = s.convey && s.convey[rk];                  // a belt drifts the rat along
+    if (cd != null) { const [dx, dy] = CONV_DIR[cd], nx = m.x + dx * TUNING.conveySpeed * dt, ny = m.y + dy * TUNING.conveySpeed * dt, cx = Math.round(nx), cy = Math.round(ny); if (isWalkable(s, cx, cy) && !lockedDoorAt(s, cx, cy)) { m.x = nx; m.y = ny; state.dirty = true; } }
     if (m.tired) { wanderMonster(m, dt); continue; }   // spent rats just amble around
     // "Dreaded" power: rats flee a fearsome player within 5 tiles
     if (m.kind === "rat") {
