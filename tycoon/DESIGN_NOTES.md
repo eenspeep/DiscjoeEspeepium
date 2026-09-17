@@ -4,6 +4,26 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Host election id-space bug ("we're both host") — SHIPPED
+The reason two players were both host (and the office desynced / peers flickered
+out on refresh): host election compared each **peer's connection id** against
+the **local profile id** (`me.id`). Those are two different id spaces. Peers
+advertise `net.myId` (a fresh `uid()` per page load), but the election ranked
+them against `me.id` (a persistent, unrelated `uid()` from localStorage). So
+client A asked "is B's *net* id < A's *profile* id?" while B asked "is A's *net*
+id < B's *profile* id?" — four unrelated random strings, which land on both-host
+or both-guest about half the time. In `?local=1` it was always broken: two tabs
+share one localStorage profile, so `me.id` was identical on both and
+`peer.id < me.id` was never true → both host, always.
+
+Fix: elect in one id space. `state.netId = net.myId` is captured in `initState`,
+and `electHost` now ranks `peer.id < state.netId` (falling back to `me.id` only
+when there's no net id). Lowest connection id wins, computed identically on every
+client, so exactly one host. Verified with a two-tab integration test: same
+shared profile id, distinct net ids, each sees the other, exactly one host, and
+it's the lowest net id. No change to messaging or the `me.id`-keyed shared ops
+(contributions, owed, paidBy) — those still use the profile id, correctly.
+
 ## 2026-09-17 — Free-form floor expansion (buy one tile at a time) — SHIPPED
 Replaced buying a whole room in bulk with claiming floor one square at a time
 out of the fog of war, so the office grows into any isometric shape the owner
