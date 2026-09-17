@@ -4,6 +4,17 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Fluid shoving (walk into people) — SHIPPED
+Removed the E/`doPush` shove action and its help text. Now walking toward
+someone in the next tile over shoves them: `updateMe` checks the tile one step
+in your movement direction, and if a peer or bot is there, `tryCollidePush`
+moves them one tile that way, throttled to once per second per target
+(`pushCd`). Bots move locally; peers get the existing `push` net message and
+resolve it on their own client. A shove is refused if the destination is a wall,
+void, furniture/Enzo, another person, or a locked door — so you can't shove
+people into solids. Their tile stays solid to you (no overlap), so you
+bump-and-follow.
+
 ## 2026-09-17 — Multiplayer perf + look persistence — SHIPPED
 Fixes for "super laggy" and "forgets our colors on refresh":
 - **Peers by broadcast, cheaply.** Position heartbeats broadcast ~7/s (smooth
