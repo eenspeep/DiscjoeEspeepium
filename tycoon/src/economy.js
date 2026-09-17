@@ -94,6 +94,26 @@ export const TRAITS = {
   scavenger:  { label: "Scavenging",        glyph: "🧲", per: (a) => `${a * 15}% loot duplication` },
 };
 export function traitVal(me, key) { return (me && me.traits && me.traits[key]) || 0; }
+
+// ---- powers (JAAIME-tier, non-stat superpowers) ---------------------------
+// Boolean abilities granted by JAAIME adjectives. Wired individually in the
+// engine via hasPower(me, key). Each is on/off (stacking JAAIME words just adds
+// more powers, they don't scale).
+export const POWERS = {
+  blink:     { glyph: "✨", label: "Blink",       desc: "Right-click a tile within 10 to teleport to it." },
+  aegis:     { glyph: "🛡️", label: "Aegis",       desc: "A free shield blocks one lethal hit, recharging every hour." },
+  ratfear:   { glyph: "🐀", label: "Dreaded",     desc: "Rats are afraid of you — they flee instead of attacking." },
+  golden:    { glyph: "🪙", label: "Midas",       desc: "+50% gold, always." },
+  goldrats:  { glyph: "💰", label: "Rat's Purse", desc: "Rats always drop their maximum gold." },
+  vampiric:  { glyph: "🧛", label: "Vampiric",    desc: "Every kill channels a burst of SOUL." },
+  magnetic:  { glyph: "🧲", label: "Magnetic",    desc: "Nearby loot flies straight into your bag." },
+  phase:     { glyph: "👻", label: "Phasewalk",   desc: "Walk straight through furniture." },
+  shameless: { glyph: "😈", label: "Shameless",   desc: "Your kills never leave a black mark." },
+  possessed: { glyph: "🔮", label: "Possessed",   desc: "Double SOUL channeling." },
+  nimble:    { glyph: "🤸", label: "Weightless",  desc: "Your jump's invincibility has no cooldown." },
+};
+export function powerList(me) { return (me && me.powers) || []; }
+export function hasPower(me, key) { return !!(me && me.powers && me.powers.includes(key)); }
 export function interactRange(me) { return TUNING.adjacencyRange + traitVal(me, "interact"); }
 export function withinReach(me, gx, gy) {
   if (!me || !me.pos) return false;
@@ -114,6 +134,7 @@ export const RARITY = {
   uncommon:  { label: "Uncommon",  weight: 42,  tint: "#3f9e57" },
   rare:      { label: "Rare",      weight: 13,  tint: "#3f6fb8" },
   legendary: { label: "Legendary", weight: 3,   tint: "#b8862f" },
+  jaaime:    { label: "JAAIME",    weight: 1,   tint: "#d64ad9" },   // grants a superpower, not stats
 };
 export const ADJECTIVES = [
   // common — one small perk
@@ -165,10 +186,26 @@ export const ADJECTIVES = [
   { word: "OVERLORD", rarity: "legendary", traits: { income: 3, build: 2, speed: 1 } },
   { word: "ANOINTED", rarity: "legendary", traits: { forgiveness: 3, pray: 2, eso: 1 } },
   { word: "POLYMATH", rarity: "legendary", traits: { research: 2, build: 2, income: 1 } },
+  // JAAIME — non-stat superpowers (see POWERS). Vanishingly rare; some carry a
+  // small flavor perk on top of the power.
+  { word: "BLINKING", rarity: "jaaime", power: "blink" },
+  { word: "BULWARKED", rarity: "jaaime", power: "aegis" },
+  { word: "DREADED", rarity: "jaaime", power: "ratfear", traits: { melee: 1 } },
+  { word: "GILDED", rarity: "jaaime", power: "golden" },
+  { word: "PROSPEROUS", rarity: "jaaime", power: "goldrats", traits: { bounty: 1 } },
+  { word: "VAMPIRIC", rarity: "jaaime", power: "vampiric", traits: { pray: 1 } },
+  { word: "MAGNETIC", rarity: "jaaime", power: "magnetic", traits: { interact: 1 } },
+  { word: "SPECTRAL", rarity: "jaaime", power: "phase", traits: { speed: 1 } },
+  { word: "SHAMELESS", rarity: "jaaime", power: "shameless" },
+  { word: "POSSESSED", rarity: "jaaime", power: "possessed", traits: { eso: 1 } },
+  { word: "WEIGHTLESS", rarity: "jaaime", power: "nimble", traits: { speed: 1 } },
+  { word: "JAAIME", rarity: "jaaime", powers: ["golden", "blink"] },   // the namesake: two powers at once
 ];
 export function adjByWord(word) { return ADJECTIVES.find((a) => a.word === word); }
+export function adjPowers(adj) { const out = []; if (adj.power) out.push(adj.power); for (const p of adj.powers || []) out.push(p); return out; }
 export function adjSummary(adj) {
   const parts = [];
+  for (const p of adjPowers(adj)) { const P = POWERS[p]; if (P) parts.push(P.glyph + " " + P.desc); }
   if (adj.stats) { if (adj.stats.brain) parts.push("🧠 +" + adj.stats.brain + " BRAIN"); if (adj.stats.build) parts.push("🔧 +" + adj.stats.build + " BUILD"); }
   for (const [k, v] of Object.entries(adj.traits || {})) { const T = TRAITS[k]; if (T) parts.push(T.glyph + " " + T.per(v)); }
   return parts.join(" · ");
@@ -184,16 +221,41 @@ export function rollAdjectives(n, excludeWords = []) {
   }
   return out;
 }
-export function buildStats(specialtyId, adj) {
+// Aggregate a specialty's starting stats with EVERY adjective on the Joey's
+// name (each word keeps stacking its perks). Returns stats + traits + powers.
+export function aggregateAdjs(specialtyId, adjs) {
   const spec = SPECIALTIES[specialtyId] || SPECIALTIES.research;
   const stats = { brain: spec.start.brain, build: spec.start.build };
-  const traits = {};
-  if (adj) {
+  const traits = {}, powers = [];
+  for (const adj of (adjs || [])) {
+    if (!adj) continue;
     if (adj.stats) { stats.brain += adj.stats.brain || 0; stats.build += adj.stats.build || 0; }
     for (const [k, v] of Object.entries(adj.traits || {})) traits[k] = (traits[k] || 0) + v;
+    for (const p of adjPowers(adj)) if (!powers.includes(p)) powers.push(p);
   }
-  return { stats, traits };
+  return { stats, traits, powers };
 }
+export function buildStats(specialtyId, adj) { return aggregateAdjs(specialtyId, adj ? [adj] : []); }
+export function buildStatsFromWords(specialtyId, words) { return aggregateAdjs(specialtyId, (words || []).map(adjByWord).filter(Boolean)); }
+
+// ---- Joe Levels (from SOUL) -----------------------------------------------
+// Your total SOUL is your Joe Level. Each level past 1 lets you add one more
+// adjective to your name. Costs grow so higher levels are a real grind.
+export function soulForLevel(L) {
+  if (L <= 1) return 0;
+  let need = 0, step = TUNING.soulPerLevelBase;
+  for (let i = 2; i <= L; i++) { need += step; step = Math.ceil(step * TUNING.soulPerLevelGrowth); }
+  return need;
+}
+export function joeLevel(me) {
+  const soul = (me && me.soul) || 0; let L = 1;
+  while (L < TUNING.maxJoeLevel && soul >= soulForLevel(L + 1)) L++;
+  return L;
+}
+// How many name adjectives this Joey is allowed (= level), and how many open.
+export function adjectiveSlots(me) { return joeLevel(me); }
+export function openAdjectiveSlots(me) { return Math.max(0, adjectiveSlots(me) - ((me && me.adjectives && me.adjectives.length) || 0)); }
+export function nextLevelSoul(me) { const L = joeLevel(me); return L >= TUNING.maxJoeLevel ? null : soulForLevel(L + 1); }
 
 // ---- furniture (tiered) ---------------------------------------------------
 // value(level1) = unit * tierPower(tier); base cost = costUnit * tierCost(tier).
@@ -491,7 +553,7 @@ export function bagGrid(me) {
 // Black marks (from kills) eat bag cells from the back. They can exceed the
 // current bag size (overflow isn't shown but still counts), so a bigger bag just
 // reveals more of your sins — you can't "bag" your way out of them.
-export function blackMarkSlots(me) { return Math.max(0, (me && me.kills || 0) - killFreebies(me)); }
+export function blackMarkSlots(me) { if (hasPower(me, "shameless")) return 0; return Math.max(0, (me && me.kills || 0) - killFreebies(me)); }
 export function blackMarkCells(me) {
   const g = bagGrid(me), total = g.w * g.h, n = Math.min(total, blackMarkSlots(me)), set = new Set();
   for (let i = 0; i < n; i++) { const idx = total - 1 - i; set.add((idx % g.w) + "," + Math.floor(idx / g.w)); }
@@ -592,6 +654,7 @@ export function income(me, shared, { passiveOnly = false } = {}) {
   let flat = TUNING.baseIncome;                 // raw gold, before multipliers
   let goldMult = 0;                              // from gold furniture (multiplies flat)
   let multPct = 0.08 * traitVal(me, "income");   // gear %, pot buff, "Income" trait
+  if (hasPower(me, "golden")) multPct += 0.5;    // Midas: +50% gold, always
   for (const def of equippedDefs(me)) {
     if (def.value) flat += itemValue(def);       // gear value = flat raw gold
     if (def.mult) multPct += def.mult;
@@ -824,6 +887,7 @@ export function soulRate(me, shared) {
   let mult = 1 + 0.2 * traitVal(me, "pray");   // "Praying speed" trait
   for (const d of equippedDefs(me)) if (d.soulBonus) mult += d.soulBonus;
   mult *= petSoulMult(me);                      // a leashed rat buddy boosts channeling
+  if (hasPower(me, "possessed")) mult *= 2;     // Possessed: double soul channeling
   return Math.round(base * TUNING.soulScale * mult * ((me && me.soulMult) || 1) * 100) / 100;
 }
 

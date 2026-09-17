@@ -89,10 +89,19 @@ export const TUNING = {
   ratAttackMs: 1000,                    // one attack per second
   ratSpeed: 2.2,                        // tiles/sec
   ratArmorChance: 0.06,                 // rare chance a rat spawns wearing a shield
-  ratCoinMin: 1, ratCoinMax: 1000,      // coins a rat drops to its killer
+  ratCoinMin: 600, ratCoinMax: 2500,    // coins a rat drops to its killer (shielded rats pay 2x)
+  ratArmoredMult: 2,                    // a shielded rat is worth this many times its gold
   kingGuard: 5,                         // hits to kill the Rat King
   kingCoinMin: 800, kingCoinMax: 6000,  // coins the Rat King drops
   petSoulMult: 1.2,                     // a rat buddy multiplies your soul channeling
+
+  // Joe Levels: your total SOUL is your level. Each level past 1 lets you add one
+  // more adjective to your name (each adjective keeps stacking its perks).
+  soulPerLevelBase: 40,                 // soul for level 2
+  soulPerLevelGrowth: 1.6,              // each further level costs this much more soul
+  maxJoeLevel: 30,
+  powerArmorCooldownMs: 60 * 60 * 1000, // "free armor / undying" powers recharge this often
+  teleportRange: 10,                    // "blink" power: right-click within this many tiles to teleport
 
   // Jump: cosmetic hop that grants a brief window of kill-immunity, then a cooldown
   jumpInvulnMs: 1000,                   // you can't be killed for this long after a jump

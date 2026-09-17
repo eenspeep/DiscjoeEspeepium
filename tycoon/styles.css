@@ -482,3 +482,17 @@ body {
 /* ---- doors -------------------------------------------------------------- */
 .build-btn.door { background: #e6eefb; }
 .build-btn.door.active { border-color: #3f6fb8; background: #d8e5fb; }
+
+/* ---- Joe name bar + level-up ------------------------------------------- */
+.name-bar { display: flex; align-items: center; gap: 6px; margin-top: 5px; max-width: 260px; }
+.nb-scroll { display: flex; gap: 5px; align-items: center; overflow-x: auto; white-space: nowrap; scrollbar-width: thin; max-width: 196px; padding-bottom: 2px; }
+.nb-scroll::-webkit-scrollbar { height: 5px; }
+.nb-scroll::-webkit-scrollbar-thumb { background: rgba(140, 150, 170, 0.5); border-radius: 3px; }
+.nb-joey { font-weight: 800; font-size: 12px; color: var(--muted, #8a94a6); letter-spacing: 0.5px; flex: 0 0 auto; }
+.nb-adj { font-weight: 800; font-size: 12px; letter-spacing: 0.4px; flex: 0 0 auto; text-shadow: 0 1px 0 rgba(0,0,0,0.28); }
+.nb-lvl { flex: 0 0 auto; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: rgba(120,130,150,0.18); color: #454b57; border: 0; cursor: default; }
+.nb-lvl.ready { background: #d64ad9; color: #fff; cursor: pointer; animation: nbpulse 1.4s ease-in-out infinite; }
+@keyframes nbpulse { 0%,100% { box-shadow: 0 0 0 0 rgba(214,74,217,0.55); } 50% { box-shadow: 0 0 0 6px rgba(214,74,217,0); } }
+.lvlup h2 { margin: 0 0 4px; }
+.lvlup .spec-row { gap: 8px; flex-wrap: wrap; }
+.lvl-card { min-width: 120px; flex: 1 1 120px; }

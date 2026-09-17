@@ -8,7 +8,7 @@ import { defaultLook, normalizeLook } from "./appearance.js";
 import {
   income, FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost,
   roomCost, canAddRoom, nextRoom, floorBounds, isWalkable, walkableSet, isProtected,
-  buildStats, SPECIALTIES, ADJECTIVES,
+  buildStats, buildStatsFromWords, adjByWord, openAdjectiveSlots, joeLevel, hasPower, SPECIALTIES, ADJECTIVES,
   ITEMS, ITEM_SLOTS, firstFit, fitsAt, itemCells, bagGrid,
   weekStartFor, everyoneVoted, tallyVotes, proposalById, PROPOSALS,
   furnitureWork, itemWork, itemPrice, isFurnitureUnlocked, isItemUnlocked,
@@ -104,7 +104,17 @@ function healMe(me) {
   if (me.pet && typeof me.pet.since !== "number") me.pet = null; // leashed rat buddy
   if (!me.traits || typeof me.traits !== "object") me.traits = {};
   healInventory(me);
+  if (me.created) recomputeIdentity(me);   // (re)derive stats/traits/powers/name from the adjective list
   return me;
+}
+
+// Rebuild everything the name grants from the adjective list: stats, traits,
+// superpowers, and the display name. Idempotent — always from scratch.
+function recomputeIdentity(me) {
+  if (!Array.isArray(me.adjectives)) me.adjectives = me.adjectiveWord ? [me.adjectiveWord] : [];
+  const { stats, traits, powers } = buildStatsFromWords(me.specialty, me.adjectives);
+  me.stats = stats; me.traits = traits; me.powers = powers;
+  me.name = "JOEY" + (me.adjectives.length ? " " + me.adjectives.join(" ") : "");
 }
 
 function loadMe() {
@@ -136,17 +146,28 @@ export function setAccount(acc) { state.account = acc; }
 
 export function createJoey({ specialty, adjectiveWord, look }) {
   const me = state.me;
-  const adj = ADJECTIVES.find((a) => a.word === adjectiveWord);
-  const { stats, traits } = buildStats(specialty, adj);
   me.specialty = SPECIALTIES[specialty] ? specialty : "research";
-  me.adjectiveWord = adjectiveWord;
-  me.name = "JOEY " + adjectiveWord;
-  me.stats = stats; me.traits = traits;
+  me.adjectiveWord = adjectiveWord;          // kept for back-compat
+  me.adjectives = [adjectiveWord];           // the name is now a growing list
+  recomputeIdentity(me);
   me.look = normalizeLook(look);
-  me.credits = TUNING.startCredits + 100 * (traits.startMoney || 0);   // "Starting money" trait
+  me.credits = TUNING.startCredits + 100 * (me.traits.startMoney || 0);   // "Starting money" trait
   me.created = true;
   me.lastTick = now(); me.lastSeen = now();
   centerMe(); saveMe(); notify();
+}
+
+// Add another adjective to the name (must have an open slot from your Joe Level).
+export function addAdjective(word) {
+  const me = state.me;
+  if (!me.created) return { ok: false };
+  if (openAdjectiveSlots(me) <= 0) return { ok: false, why: "Reach the next Joe Level (channel more SOUL) first." };
+  if (!adjByWord(word)) return { ok: false, why: "Unknown adjective." };
+  if (!Array.isArray(me.adjectives)) me.adjectives = [];
+  me.adjectives.push(word);
+  recomputeIdentity(me);
+  state.meDirty = true; saveMe(); notify();
+  return { ok: true, name: me.name };
 }
 
 function entityTiles() {
@@ -307,6 +328,7 @@ export function tickEconomy() {
       buildTick(dt);
     }
     me.lastSeen = t;
+    if (hasPower(me, "magnetic")) magnetPull();   // Magnetic: nearby loot flies into the bag
     if (t - lastContribFlush > 750) { lastContribFlush = t; flushContrib(); }   // batch build/research to the host
     claimOwed();
   }
@@ -725,6 +747,12 @@ export function receiveAttack(fromName) {
     state.justPetHit = { by: fromName || "someone" };
     return { blocked: true, pet: true };
   }
+  if (hasPower(me, "aegis") && (me.aegisReadyAt || 0) <= now()) {   // free recharging shield
+    me.aegisReadyAt = now() + TUNING.powerArmorCooldownMs;
+    state.meDirty = true; saveMe(); notify();
+    state.justBlocked = { by: fromName || "someone", shield: "Aegis (recharges hourly)" };
+    return { blocked: true, shield: "Aegis" };
+  }
   const shield = lowestShield(me);
   if (shield) {
     const name = shield.def.name;
@@ -757,9 +785,11 @@ export function registerKill(victimName) {
   const me = state.me;
   me.kills = (me.kills || 0) + 1;
   me.soulMult = round2((me.soulMult || 1) + TUNING.killSoulMult);
-  if (me.kills <= killFreebies(me)) state.justFirstKill = true;   // "Forgiveness" trait extends the grace
+  if (hasPower(me, "vampiric")) me.soul = round2((me.soul || 0) + 50);   // Vampiric: a burst of SOUL per kill
+  if (hasPower(me, "shameless")) state.justFirstKill = true;             // Shameless: no black mark, ever
+  else if (me.kills <= killFreebies(me)) state.justFirstKill = true;     // "Forgiveness" trait extends the grace
   else state.justBlackMark = true;
-  absorbBlackMarks(me);
+  absorbBlackMarks(me);   // no-op when shameless (blackMarkSlots returns 0)
   state.meDirty = true; saveMe(); notify();
 }
 function absorbBlackMarks(me) {
@@ -800,6 +830,17 @@ export function tryPickup(gx, gy) {
   return { ok: taken.length > 0, taken: taken.length, left: left.length };
 }
 
+// "Magnetic" power: sweep nearby loot piles straight into the bag each tick.
+function magnetPull() {
+  const s = state.shared, me = state.me;
+  if (!s || !s.loot || !me.pos) return;
+  const R = 3, px = Math.round(me.pos.x), py = Math.round(me.pos.y);
+  for (const key of Object.keys(s.loot)) {
+    const [x, y] = key.split(",").map(Number);
+    if (Math.max(Math.abs(x - px), Math.abs(y - py)) <= R) tryPickup(x, y);
+  }
+}
+
 // ---- jump + brief invulnerability -----------------------------------------
 // A jump always hops (cosmetic). If the guard is off cooldown it also grants 1s
 // of kill-immunity, then a 60s cooldown. State is ephemeral (not saved), so a
@@ -813,11 +854,22 @@ export function tryJump() {
   state.jumpPassedKey = null;
   if (t >= (state.jumpCdUntil || 0)) {
     state.invulnUntil = t + TUNING.jumpInvulnMs;
-    state.jumpCdUntil = t + TUNING.jumpCooldownMs;
+    state.jumpCdUntil = hasPower(me, "nimble") ? 0 : t + TUNING.jumpCooldownMs;   // Weightless: no cooldown
     notify();
     return { ok: true, invuln: true };
   }
   return { ok: true, invuln: false, cdLeft: Math.ceil(((state.jumpCdUntil || 0) - t) / 1000) };
+}
+// "Blink" power: teleport to a walkable tile within range (right-click in world).
+export function tryTeleport(gx, gy) {
+  const me = state.me, s = state.shared;
+  if (!me || !me.created || !hasPower(me, "blink")) return { ok: false };
+  const px = Math.round(me.pos.x), py = Math.round(me.pos.y);
+  if (Math.max(Math.abs(gx - px), Math.abs(gy - py)) > TUNING.teleportRange) return { ok: false, why: "Too far to blink." };
+  if (!isWalkable(s, gx, gy) || blockedTiles(s).has(gx + "," + gy) || lockedDoorAt(s, gx, gy)) return { ok: false, why: "Can't blink there." };
+  me.pos = { x: gx, y: gy }; me.moving = false;
+  state.meDirty = true; saveMe(); notify();
+  return { ok: true };
 }
 export function isInvulnerable() { return now() < (state.invulnUntil || 0); }
 export function jumpCdLeft() { return Math.max(0, Math.ceil(((state.jumpCdUntil || 0) - now()) / 1000)); }
@@ -919,7 +971,7 @@ function spawnRat(x, y) {
   if (aliveRats() >= TUNING.ratMaxAlive) { formRatKing(); return; }   // the swarm coalesces
   const armor = Math.random() < TUNING.ratArmorChance ? SHIELD_TYPES[Math.floor(Math.random() * SHIELD_TYPES.length)] : null;
   const id = "rat-" + uid();
-  s.monsters[id] = { id, kind: "rat", x, y, attacks: 0, guard: armor ? 1 : 0, armor, cool: 0 };
+  s.monsters[id] = { id, kind: "rat", x, y, attacks: 0, guard: armor ? 1 : 0, armor, armored: !!armor, cool: 0 };
   state.dirty = true;
 }
 function formRatKing() {
@@ -962,7 +1014,10 @@ export function hitMonster(id) {
     commit();
     return { ok: true, blocked: true, king: m.kind === "king", guard: newGuard };
   }
-  const coins = m.kind === "king" ? randInt(TUNING.kingCoinMin, TUNING.kingCoinMax) : randInt(TUNING.ratCoinMin, TUNING.ratCoinMax);
+  const lucky = hasPower(state.me, "goldrats");   // "Rat's Purse": always max
+  let coins;
+  if (m.kind === "king") coins = lucky ? TUNING.kingCoinMax : randInt(TUNING.kingCoinMin, TUNING.kingCoinMax);
+  else { const base = lucky ? TUNING.ratCoinMax : randInt(TUNING.ratCoinMin, TUNING.ratCoinMax); coins = m.armored ? Math.round(base * TUNING.ratArmoredMult) : base; }
   state.me.credits = round2(state.me.credits + coins); state.meDirty = true;
   if (m.armor) addLoot(key, [m.armor]);
   sharedOp({ t: "monster-", id });
@@ -1012,8 +1067,8 @@ export function receiveMonsterHit(king) {
 
 function monsterTargets() {
   const s = state.shared, out = [];
-  if (state.me.created) out.push({ type: "player", id: state.me.id, x: state.me.pos.x, y: state.me.pos.y, me: true });
-  for (const p of state.peers) if (p.x != null) out.push({ type: "player", id: p.id, x: p.x, y: p.y });
+  if (state.me.created) out.push({ type: "player", id: state.me.id, x: state.me.pos.x, y: state.me.pos.y, me: true, fear: hasPower(state.me, "ratfear") });
+  for (const p of state.peers) if (p.x != null) out.push({ type: "player", id: p.id, x: p.x, y: p.y, fear: !!(p.powers && p.powers.includes("ratfear")) });
   for (const [key, f] of Object.entries(s.furniture)) { if (f.broken) continue; const [gx, gy] = key.split(",").map(Number); out.push({ type: "furn", key, x: gx, y: gy }); }
   return out;
 }
@@ -1061,8 +1116,19 @@ function monsterTick(t) {
   const targets = monsterTargets();
   for (const m of mons) {
     if (m.tired) { wanderMonster(m, dt); continue; }   // spent rats just amble around
+    // "Dreaded" power: rats flee a fearsome player within 5 tiles
+    if (m.kind === "rat") {
+      let scare = null, sd = Infinity;
+      for (const tg of targets) if (tg.type === "player" && tg.fear) { const d = Math.hypot(tg.x - m.x, tg.y - m.y); if (d < sd) { sd = d; scare = tg; } }
+      if (scare && sd < 5) {
+        const step = TUNING.ratSpeed * dt, ddx = m.x - scare.x, ddy = m.y - scare.y, dist = Math.hypot(ddx, ddy) || 1;
+        const nx = m.x + (ddx / dist) * step, ny = m.y + (ddy / dist) * step, rx = Math.round(nx), ry = Math.round(ny);
+        if (isWalkable(s, rx, ry) && !lockedDoorAt(s, rx, ry)) { m.x = nx; m.y = ny; state.dirty = true; }
+        continue;
+      }
+    }
     let best = null, bd = Infinity;
-    for (const tg of targets) { const d = Math.hypot(tg.x - m.x, tg.y - m.y); if (d < bd) { bd = d; best = tg; } }
+    for (const tg of targets) { if (tg.type === "player" && tg.fear) continue; const d = Math.hypot(tg.x - m.x, tg.y - m.y); if (d < bd) { bd = d; best = tg; } }
     if (!best) continue;
     if (bd > 1.25) {
       const step = TUNING.ratSpeed * dt, ddx = best.x - m.x, ddy = best.y - m.y, dist = Math.hypot(ddx, ddy) || 1;

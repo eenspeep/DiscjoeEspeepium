@@ -4,6 +4,33 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Joe Levels, multi-adjective names, JAAIME superpowers — SHIPPED
+Big content drop.
+- **Rat gold** now rolls 600–2500 (was 1–1000). Shielded rats pay 2× (tracked
+  with a persistent `armored` flag since the armor drops on the guard hit).
+- **Joe Levels from SOUL.** Your total SOUL is your level (`joeLevel`,
+  `soulForLevel` — 40 soul for L2, ×1.6 each level, cap 30). Each level past 1
+  opens one name-adjective slot.
+- **Names are now a growing list.** `me.adjectives` is an array; stats, traits,
+  powers and the display name are re-derived from all of them via
+  `aggregateAdjs`/`recomputeIdentity` (idempotent). Old single-adjective saves
+  migrate (`me.adjectiveWord` → `[word]`). `addAdjective` appends when you have
+  an open slot; the HUD **name bar** shows JOEY + each adjective colored by its
+  rarity in a scroll strip (truncates, hover/drag to see the rest), plus a Joe
+  Level chip that pulses when you can add one. Clicking it opens a LEVEL UP roll
+  (3 weighted adjectives, 2 rerolls) — perks stack.
+- **JAAIME rarity + superpowers.** New top rarity `jaaime` (weight 1). Powers
+  (on/off, wired via `hasPower`): blink (right-click within 10 to teleport),
+  aegis (free hourly-recharging shield), ratfear (rats flee you), golden (+50%
+  gold), goldrats (rats always drop max), vampiric (+50 soul per kill), magnetic
+  (auto-vacuum nearby loot), phase (walk through furniture), shameless (no black
+  marks), possessed (2× soul), nimble (jump has no cooldown). JAAIME adjectives:
+  BLINKING, BULWARKED, DREADED, GILDED, PROSPEROUS, VAMPIRIC, MAGNETIC, SPECTRAL,
+  SHAMELESS, POSSESSED, WEIGHTLESS, and JAAIME (golden+blink). Powers ride in
+  presence so peers' ratfear works host-side. Verified headless: levels,
+  add-adjective, every power flag, rat gold range + armored 2x + goldrats max,
+  golden +50%, aegis block; name bar + level-up render clean.
+
 ## 2026-09-17 — Spawn/unstick spread around center (no more stacking) — SHIPPED
 Getting wedged at spawn was everyone resolving to the SAME tile: `centerMe` used
 a deterministic `freeTileNear(center)`, and the center tile is an Enzo cell, so
