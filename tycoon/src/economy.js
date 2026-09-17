@@ -838,6 +838,16 @@ export function canBuyTiles(shared) { return tileCount(shared) < TUNING.maxTiles
 // (you can only grow the shape outward from its edge).
 export function isBuyableTile(shared, gx, gy) {
   if (isWalkable(shared, gx, gy)) return false;
+  if (isWarded(shared, gx, gy)) return false;   // a secured tile can't be bought by anyone
+  return isWalkable(shared, gx - 1, gy) || isWalkable(shared, gx + 1, gy) || isWalkable(shared, gx, gy - 1) || isWalkable(shared, gx, gy + 1);
+}
+// A "warded" tile is a void frontier tile someone paid to secure: it can never be
+// bought, so a ring of wards seals a room against tunnelling-by-expansion.
+export function isWarded(shared, gx, gy) { return !!(shared.wards && shared.wards[gx + "," + gy]); }
+// A void tile is securable if it's fog that orthogonally touches existing floor
+// (the same frontier you could otherwise expand into).
+export function isWardableTile(shared, gx, gy) {
+  if (isWalkable(shared, gx, gy) || isWarded(shared, gx, gy)) return false;
   return isWalkable(shared, gx - 1, gy) || isWalkable(shared, gx + 1, gy) || isWalkable(shared, gx, gy - 1) || isWalkable(shared, gx, gy + 1);
 }
 // The set of buyable void tiles hugging the whole office edge (the "fog frontier").

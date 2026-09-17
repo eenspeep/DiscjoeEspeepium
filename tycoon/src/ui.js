@@ -33,7 +33,7 @@ import {
   petActive,
 } from "./economy.js";
 import { LOOK_PICKERS, lookColor, drawJoey, drawJoeySprite, defaultLook } from "./appearance.js";
-import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setBuildWall, getBuildWall, setBuildExpand, getBuildExpand, setBuildConvey, getBuildConvey, setBuildTrap, getBuildTrap, setSelected, unlockDoorLocal } from "./world.js";
+import { setBuild, getBuild, setBuildMod, getBuildMod, setBuildDoor, getBuildDoor, setBuildWall, getBuildWall, setBuildExpand, getBuildExpand, setBuildWard, getBuildWard, setBuildConvey, getBuildConvey, setBuildTrap, getBuildTrap, setSelected, unlockDoorLocal } from "./world.js";
 
 let hud, buildbar, panel, toast;
 let openKey = null, openView = null;
@@ -234,6 +234,7 @@ function heldLabel() {
   if (getBuildConvey()) return "🔀 Conveyor belt";
   if (getBuildTrap()) return "☠️ Trap";
   if (getBuildExpand()) return "🧭 Expand floor";
+  if (getBuildWard()) return "🔒 Secure tile";
   return null;
 }
 function renderBuildbar() {
@@ -243,7 +244,7 @@ function renderBuildbar() {
   buildbar.classList.add("show");
   buildbar.replaceChildren(
     el("span", { class: "hand-label", text: "Holding: " + label }),
-    el("span", { class: "hand-hint", text: (getBuildExpand() ? "click glowing fog at your edge" : getBuildWall() ? "aim at a wall within reach" : getBuildConvey() ? "click floor to lay belt · R aims it" : getBuildTrap() ? "click floor to arm a trap" : "click within reach") + (getBuild() ? " · R to rotate" : "") }),
+    el("span", { class: "hand-hint", text: (getBuildExpand() ? "click glowing fog at your edge" : getBuildWard() ? "click fog at your edge to secure it" : getBuildWall() ? "aim at a wall within reach" : getBuildConvey() ? "click floor to lay belt · R aims it" : getBuildTrap() ? "click floor to arm a trap" : "click within reach") + (getBuild() ? " · R to rotate" : "") }),
     el("button", { class: "btn small", onclick: clearHands }, ["Put away"]),
   );
 }
@@ -263,6 +264,7 @@ function takeMod(type) { setBuildMod(type); flash("Holding " + MODS[type].name +
 function takeDoor() { setBuildDoor(true); flash("Holding a door — click any floor tile within reach."); closePanel(); renderBuildbar(); }
 function takeWall(type) { setBuildWall(type); flash("Holding " + WALL_DECOR[type].name + " — aim at a wall within reach and click."); closePanel(); renderBuildbar(); }
 function takeExpand() { setBuildExpand(true); flash("Expand mode — walk to your office edge and click the glowing fog to claim floor."); closePanel(); renderBuildbar(); }
+function takeWard() { setBuildWard(true); flash("Secure mode — click the fog at your edge to lock a tile so no one can buy it."); closePanel(); renderBuildbar(); }
 function takeConvey() { setBuildConvey(true); flash("Holding a conveyor belt — click a floor tile to lay it, R aims the arrow."); closePanel(); renderBuildbar(); }
 function takeTrap() { setBuildTrap(true); flash("Holding a trap — click a floor tile to arm it. It kills whoever (not you) steps on it."); closePanel(); renderBuildbar(); }
 
@@ -307,6 +309,9 @@ function renderShop() {
   kids.push(currentTier(s) >= TUNING.doorTier
     ? shopRow("🚪", "Door", "install on any floor tile, lock it later", TUNING.doorCost, me.credits >= TUNING.doorCost, takeDoor)
     : el("div", { class: "shop-row locked", text: "🔒 Door — unlocks at research Tier " + TUNING.doorTier }));
+  kids.push(currentTier(s) >= TUNING.wardTier
+    ? shopRow("🔒", "Secure Tile", "lock a fog tile so no one can tunnel in", TUNING.wardCost, me.credits >= TUNING.wardCost, takeWard)
+    : el("div", { class: "shop-row locked", text: "🔒 Secure Tile — unlocks at research Tier " + TUNING.wardTier }));
 
   // Contraptions: conveyor belts + traps (floor overlays)
   kids.push(el("div", { class: "ward-label", text: "Contraptions · belts & traps on the floor" }));
