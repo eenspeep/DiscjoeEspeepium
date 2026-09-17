@@ -4,6 +4,35 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Conveyor belts + traps (floor contraptions) — SHIPPED
+Two placeable floor overlays, bought from a new Shop "Contraptions" section and
+laid on any empty floor tile within reach.
+- **Conveyor belts** (`conveyCost` 120). Pick up "Conveyor Belt", click a tile
+  to lay one, press **R** while holding to rotate it through the four cardinal
+  aims before dropping. Anyone or anything standing on a belt drifts one tile in
+  its aim: the player (`updateMe` drift block, `conveySpeed` tiles/sec, gated by
+  the same `solid` check so belts never shove you into a wall/furniture), rats
+  and monsters (`monsterTick` drift), and loot piles (host-only `conveyLootTick`
+  hops a pile one tile down its belt every `conveyLootMs`, merging onto any pile
+  already there). Chain them to move things across the room. Re-aiming an
+  existing belt is free; removing one refunds. Stored in `shared.convey` as
+  `{ "x,y": dir }` (dir index into `CONV_DIR`).
+- **Traps** (`trapCost` 300, unlock at research `trapTier`). Lay one on a floor
+  tile within reach; anything that steps on it dies and the trap loses one use.
+  Starts at `trapUses` (3) uses; **upgrade** via the right-click menu for
+  `trapUpgradeUses` more each time (raises both `uses` and `max`). At zero uses
+  it's `broken` (disrepair) and stops killing. **The owner is immune to their own
+  traps** (`springTrapOnMe` checks `tr.by === me.id`), as is a jump-invulnerable
+  player. Rats die on contact in `monsterTick`. Stored in `shared.traps` as
+  `{ "x,y": { by, uses, max, broken } }`. Rendered as a red tile with spike
+  glyphs and a live `uses/max` counter.
+- **Ops** (`applyOp`): `convey+/convey-`, `trap+/trap-/trapHit/trapUp`. Both
+  overlays are host-authoritative like all shared mutations. Right-click a belt
+  to rotate/remove it, a trap to upgrade/remove it.
+- Verified headless: player rides a 4-belt chain (x 3 → 6.5), rat drifts along a
+  belt, trap kills a rat and decrements uses, upgrade raises max, owner unharmed,
+  and both render correctly (belts show aim arrows, traps show spikes + count).
+
 ## 2026-09-17 — Soul-level cost doubles + signature adjective — SHIPPED
 - **Soul leveling doubles per tier.** `soulForLevel` marginal cost is now
   `soulPerLevelBase × 2^(i-1)` (base 40): tier 1 ×2, tier 2 ×4, tier 3 ×8, …

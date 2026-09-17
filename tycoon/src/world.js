@@ -15,7 +15,7 @@ import {
 } from "./economy.js";
 import { TUNING, CHARLIE_ID } from "./config.js";
 import { clamp, lerp, now, hash } from "./util.js";
-import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick, tryTeleport, charlieEatRat, trySellFurniture, tryLiftFurniture, tryDropFurniture, sellRefundWho } from "./state.js";
+import { state, inBounds, tryPlaceFurniture, tryPlaceMod, tryRemoveMod, tryPlaceDoor, tryPlaceWall, tryBuyTile, useWeapon, killCharlie, tryPickup, isCharlieAlive, tryClickEnzo, hitMonster, recruitRat, tryJump, isInvulnerable, unstick, tryTeleport, charlieEatRat, trySellFurniture, tryLiftFurniture, tryDropFurniture, sellRefundWho, CONV_DIR, tryPlaceConvey, tryRemoveConvey, tryPlaceTrap, tryUpgradeTrap, tryRemoveTrap, springTrapOnMe } from "./state.js";
 
 let canvas, ctx, dpr = 1;
 let buildType = null;   // furniture type being placed
@@ -23,6 +23,8 @@ let buildMod = null;    // node-mod type being placed
 let buildDoor = false;  // placing a door
 let buildWall = null;   // wall-decor type being hung
 let buildExpand = false; // buying floor tiles out of the fog
+let buildConvey = false, buildConveyDir = 0;   // placing/aiming a conveyor belt
+let buildTrap = false;   // placing a trap
 let buildRot = 0;       // rotation (0..3) for furniture placement
 let enzoClickT = -9;    // last Enzo-click time, for the click pulse
 const ZMIN = 0.5, ZMAX = 2.6;   // in-game zoom range (pinch / wheel / buttons)
@@ -73,6 +75,7 @@ export function initWorld(canvasEl, hooks = {}) {
       chase = null; setBuild(null); return;   // drop what's in hand / stop chasing
     }
     if (k === "r" && movingFurn) { movingFurn.rot = ((movingFurn.rot || 0) + 1) % 4; return; }
+    if (k === "r" && buildConvey) { buildConveyDir = (buildConveyDir + 1) % 4; return; }
     if (k === "r" && buildType) { buildRot = (buildRot + 1) % 4; return; }
     if ("wasd".includes(k) || k.startsWith("arrow")) chase = null;   // manual move cancels a chase
     keys.add(k);
@@ -150,15 +153,20 @@ export function initWorld(canvasEl, hooks = {}) {
 
 // If you're carrying a picked-up piece and grab a different tool, set it back down.
 function dropCarriedBack() { if (movingFurn) { const [ox, oy] = movingFurn.origKey.split(",").map(Number); tryDropFurniture(ox, oy, movingFurn.f.rot || 0, movingFurn.f); movingFurn = null; } }
-export function setBuild(type) { dropCarriedBack(); buildType = type; buildMod = null; buildDoor = false; buildWall = null; buildExpand = false; }
+function clearHolds() { dropCarriedBack(); buildType = null; buildMod = null; buildDoor = false; buildWall = null; buildExpand = false; buildConvey = false; buildTrap = false; }
+export function setBuild(type) { clearHolds(); buildType = type; }
 export function getBuild() { return buildType; }
-export function setBuildMod(type) { dropCarriedBack(); buildMod = type; buildType = null; buildDoor = false; buildWall = null; buildExpand = false; }
+export function setBuildMod(type) { clearHolds(); buildMod = type; }
 export function getBuildMod() { return buildMod; }
-export function setBuildDoor(on) { dropCarriedBack(); buildDoor = on; buildType = null; buildMod = null; buildWall = null; buildExpand = false; }
+export function setBuildDoor(on) { clearHolds(); buildDoor = on; }
 export function getBuildDoor() { return buildDoor; }
-export function setBuildWall(type) { dropCarriedBack(); buildWall = type; buildType = null; buildMod = null; buildDoor = false; buildExpand = false; }
+export function setBuildWall(type) { clearHolds(); buildWall = type; }
 export function getBuildWall() { return buildWall; }
-export function setBuildExpand(on) { dropCarriedBack(); buildExpand = on; buildType = null; buildMod = null; buildDoor = false; buildWall = null; }
+export function setBuildConvey(on) { clearHolds(); buildConvey = on; }
+export function getBuildConvey() { return buildConvey; }
+export function setBuildTrap(on) { clearHolds(); buildTrap = on; }
+export function getBuildTrap() { return buildTrap; }
+export function setBuildExpand(on) { clearHolds(); buildExpand = on; }
 export function getBuildExpand() { return buildExpand; }
 export function setSelected(key) { selectedKey = key; }
 
@@ -180,6 +188,16 @@ function onClick() {
   if (buildExpand) {   // buying floor out of the fog
     const r = tryBuyTile(gx, gy);
     onTileMessage(r.ok ? ("Floor claimed for " + r.cost + "¢.") : (r.why || "Can't expand there."));
+    return;
+  }
+  if (buildConvey) {
+    const r = tryPlaceConvey(gx, gy, buildConveyDir);
+    onTileMessage(r.ok ? "Belt placed. R rotates, keep clicking to lay more." : (r.why || "Can't put a belt there."));
+    return;
+  }
+  if (buildTrap) {
+    const r = tryPlaceTrap(gx, gy);
+    onTileMessage(r.ok ? "Trap armed." : (r.why || "Can't put a trap there."));
     return;
   }
   const fKey = furnitureAnchorAt(state.shared, gx, gy);
@@ -257,6 +275,16 @@ function contextActions(gx, gy) {
     const f = s.furniture[fKey], name = FURNITURE[f.type] ? FURNITURE[f.type].name : "furniture";
     out.push({ label: "💰 Sell " + name + " (refund to " + sellRefundWho(f) + ")", run: () => { const r = trySellFurniture(fKey); onTileMessage(!r.ok ? (r.why || "Can't sell.") : r.toOther ? "Sold — " + Math.round(r.refund) + "¢ to its buyer." : "Sold for " + Math.round(r.refund) + "¢."); } });
     out.push({ label: "✋ Pick up & move " + name, run: () => { const r = tryLiftFurniture(fKey); if (r.ok) { movingFurn = { f: r.f, rot: r.f.rot || 0, origKey: fKey }; onTileMessage("Carrying it — click a spot to set it down (R rotates, Esc cancels)."); } else onTileMessage(r.why || "Can't move it."); } });
+  }
+  const okey = gx + "," + gy;
+  if (s.convey && s.convey[okey] != null) {
+    out.push({ label: "🔁 Rotate belt", run: () => { tryPlaceConvey(gx, gy, (s.convey[okey] + 1) % 4); } });
+    out.push({ label: "🗑️ Remove belt", run: () => { const r = tryRemoveConvey(okey); onTileMessage(r.ok ? "Belt removed (+" + Math.round(r.refund) + "¢)." : (r.why || "")); } });
+  }
+  if (s.traps && s.traps[okey]) {
+    const tr = s.traps[okey];
+    out.push({ label: "⬆️ Upgrade trap (+" + 2 + " uses)", run: () => { const r = tryUpgradeTrap(okey); onTileMessage(r.ok ? "Trap upgraded to " + r.max + " uses." : (r.why || "")); } });
+    out.push({ label: "🗑️ Remove trap", run: () => { const r = tryRemoveTrap(okey); onTileMessage(r.ok ? "Trap removed (+" + Math.round(r.refund) + "¢)." : (r.why || "")); } });
   }
   const sKey = siteAnchorAt(s, gx, gy);
   if (!fKey && sKey) out.push({ label: "🔨 Open build site", run: () => onSiteClick(sKey, s.sites[sKey]) });
@@ -472,6 +500,17 @@ function updateMe(dt) {
   }
   if (target && !movedX && !movedY) target = null; // stuck against something
   me.moving = want && (movedX || movedY);
+
+  // conveyor belts drift you along; a trap underfoot springs
+  const sh = state.shared, rk = Math.round(me.pos.x) + "," + Math.round(me.pos.y);
+  const cd = sh.convey && sh.convey[rk];
+  if (cd != null) {
+    const [ddx, ddy] = CONV_DIR[cd], dx2 = ddx * TUNING.conveySpeed * dt, dy2 = ddy * TUNING.conveySpeed * dt;
+    if (dx2 && !solid(Math.round(me.pos.x + dx2), Math.round(me.pos.y))) me.pos.x = clamp(me.pos.x + dx2, f.x, f.x + f.w - 1);
+    if (dy2 && !solid(Math.round(me.pos.x), Math.round(me.pos.y + dy2))) me.pos.y = clamp(me.pos.y + dy2, f.y, f.y + f.h - 1);
+  }
+  const tk = Math.round(me.pos.x) + "," + Math.round(me.pos.y);
+  if (sh.traps && sh.traps[tk] && springTrapOnMe(tk)) onTileMessage("☠️ You stepped on a trap!");
 }
 
 function updatePeers(dt) {
@@ -574,6 +613,8 @@ function draw(t) {
     drawTile(gx, gy, fill);
   }
   for (const [gx, gy] of floorCells) drawBackWalls(s, gx, gy, walk);
+  for (const [k, d] of Object.entries(s.convey || {})) { const [gx, gy] = k.split(",").map(Number); drawConvey(gx, gy, d); }
+  for (const [k, tr] of Object.entries(s.traps || {})) { const [gx, gy] = k.split(",").map(Number); drawTrap(gx, gy, tr); }
 
   // the fog frontier: the ring of buyable void hugging the office. Always a faint
   // hint; in Expand mode it lights up, brighter where you can reach to claim it.
@@ -633,6 +674,12 @@ function draw(t) {
         ctx.fillStyle = "rgba(20,22,28,0.82)"; rrect(ctx, p.x - wpx / 2, p.y - 10 * Z, wpx, 15 * Z, 7 * Z);
         ctx.fillStyle = ok ? "#8ff0ac" : "#f2c14e"; ctx.fillText(label, p.x, p.y - 2.5 * Z);
       }
+    } else if (buildConvey) {
+      const ok = reach && isWalkable(s, mouse.gx, mouse.gy) && !blockedTiles(s).has(mouse.gx + "," + mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !(s.traps && s.traps[mouse.gx + "," + mouse.gy]);
+      if (isWalkable(s, mouse.gx, mouse.gy)) { drawTile(mouse.gx, mouse.gy, ok ? "rgba(70,190,230,0.5)" : "rgba(230,80,70,0.45)"); if (ok) drawConvey(mouse.gx, mouse.gy, buildConveyDir); }
+    } else if (buildTrap) {
+      const ok = reach && isWalkable(s, mouse.gx, mouse.gy) && !blockedTiles(s).has(mouse.gx + "," + mouse.gy) && !s.doors[mouse.gx + "," + mouse.gy] && !(s.convey && s.convey[mouse.gx + "," + mouse.gy]) && !(s.traps && s.traps[mouse.gx + "," + mouse.gy]);
+      if (isWalkable(s, mouse.gx, mouse.gy)) drawTile(mouse.gx, mouse.gy, ok ? "rgba(205,60,55,0.5)" : "rgba(230,150,70,0.45)");
     } else if (isWalkable(s, mouse.gx, mouse.gy)) {
       drawTile(mouse.gx, mouse.gy, "rgba(90,120,220,0.35)");
     }
@@ -818,6 +865,27 @@ function drawCellsPrism(cells, tint, z, { selected = false, using = false, alpha
   ctx.globalAlpha = 1;
 }
 
+function drawConvey(gx, gy, dir) {
+  drawTile(gx, gy, "rgba(90,110,140,0.34)");
+  const [dx, dy] = CONV_DIR[dir], Z = camera.zoom;
+  const p0 = project(gx - dx * 0.3, gy - dy * 0.3, canvas), p1 = project(gx + dx * 0.3, gy + dy * 0.3, canvas);
+  ctx.strokeStyle = "#e6edf8"; ctx.lineWidth = 2.4 * Z; ctx.lineCap = "round";
+  ctx.beginPath(); ctx.moveTo(p0.x, p0.y); ctx.lineTo(p1.x, p1.y); ctx.stroke();
+  const ang = Math.atan2(p1.y - p0.y, p1.x - p0.x), a = 6 * Z;
+  ctx.beginPath();
+  ctx.moveTo(p1.x, p1.y); ctx.lineTo(p1.x - a * Math.cos(ang - 0.5), p1.y - a * Math.sin(ang - 0.5));
+  ctx.moveTo(p1.x, p1.y); ctx.lineTo(p1.x - a * Math.cos(ang + 0.5), p1.y - a * Math.sin(ang + 0.5));
+  ctx.stroke();
+}
+function drawTrap(gx, gy, tr) {
+  drawTile(gx, gy, tr.broken ? "rgba(90,90,95,0.35)" : "rgba(205,60,55,0.42)");
+  const c = project(gx, gy, canvas), Z = camera.zoom;
+  ctx.fillStyle = tr.broken ? "#7c7c80" : "#eceef4";
+  for (let i = -1; i <= 1; i++) { const x = c.x + i * 6 * Z; ctx.beginPath(); ctx.moveTo(x - 3 * Z, c.y + 3 * Z); ctx.lineTo(x, c.y - 5 * Z); ctx.lineTo(x + 3 * Z, c.y + 3 * Z); ctx.closePath(); ctx.fill(); }
+  ctx.font = `${9 * Z}px "Fredoka", system-ui, sans-serif`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillStyle = tr.broken ? "#e08a8a" : "#fff";
+  ctx.fillText(tr.broken ? "broken" : (tr.uses + "/" + tr.max), c.x, c.y + 11 * Z);
+}
 function drawTile(gx, gy, fill) {
   const c = tileCorners(gx, gy);
   ctx.beginPath();
