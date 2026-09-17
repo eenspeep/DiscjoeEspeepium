@@ -345,7 +345,9 @@ function updateMe(dt) {
   for (const n of activeBots()) entAt.set(Math.round(n.x) + "," + Math.round(n.y), { kind: "bot", id: n.id, ref: n, x: n.x, y: n.y });
   const jumping = now() < (state.jumpPassUntil || 0);
   const phasing = hasPower(state.me, "phase");   // Phasewalk: pass all furniture
+  const noclip = now() < (state.noclipUntil || 0);   // admin boost: pass everything briefly
   const solid = (gx, gy) => {
+    if (noclip) return false;
     const k = gx + "," + gy;
     if (!walk.has(k) || ents.has(k)) return true;   // void/wall and people always stop you
     const d = doors[k];

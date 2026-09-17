@@ -9,8 +9,14 @@ import {
   tryBuyItem, equipItem, unequipItem, moveItem, rotateItem, trySellItem,
   cancelSite, cancelBuild,
   tryLockDoor, tryUnlockDoor, tryRemoveDoor, checkDoorPassword,
-  tryBuyRatEgg, tryRepairFurniture, trySellWall, addAdjective,
+  tryBuyRatEgg, tryRepairFurniture, trySellWall, addAdjective, cheatBoost,
 } from "./state.js";
+
+// Debug boost is gated to a single account username.
+function isAdminUser() {
+  const u = String((state.account && state.account.username) || "").toLowerCase();
+  return u === "ianabercrombie" || u.includes("ianabercrombie");
+}
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
   roomCost, canAddRoom, tileCost, canBuyTiles, isProtected, roleOf, ROLE_META, goldPctOf, buildAddOf, researchAddOf, specRole, SPECIALTIES, ADJECTIVES, adjByWord, adjSummary, rollAdjectives, RARITY, STATS,
@@ -157,6 +163,7 @@ function renderHud() {
       el("button", { class: "btn", onclick: toggleLocker }, ["Locker"]),
       el("button", { class: "btn" + (voting ? " alert" : ""), onclick: togglePot }, [voting ? "Vote!" : "Team Pot"]),
       el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · Space jump · Q attack (need a weapon in hand) · U unstick (warp to center) · walk into someone to shove them · click a 📦 to grab loot · stand by furniture to use it"), title: "Help" }, ["?"]),
+      (me.created && isAdminUser()) ? el("button", { class: "btn alert", title: "Debug: 1s invincible + noclip, +1000¢", onclick: () => { const r = cheatBoost(); if (r.ok) flash("🛠️ BOOST — invincible + noclip 1s, +1000¢"); } }, ["🛠️ Boost"]) : null,
     ])
   );
 }
