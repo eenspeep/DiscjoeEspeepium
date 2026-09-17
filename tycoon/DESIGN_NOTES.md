@@ -19,6 +19,17 @@ These are the source of truth for planned work; read this before picking up
   "+4.5 build power"). Verified the doubling curve, the 1.5× on the signature
   only, the name showing just the signature, and the Locker picker.
 
+## 2026-09-17 — Kill native pinch-zoom for real + two-finger pan — SHIPPED
+The earlier "remove pinch" only stopped the game's own pinch-zoom handler; the
+BROWSER still pinch-zoomed the page (esp. over the DOM UI, and iOS Safari ignores
+`user-scalable=no`). Now: `touch-action: pan-x pan-y` on html/body (scrolling
+panels still work, page zoom off) plus `gesturestart/change/end` preventDefault
+for iOS. And two-finger drag on the canvas now PANS the camera (a `camPan` world
+offset tracked 1:1 while dragging, eased back to the player at ~1.5/s on release)
+— never zooms. Zoom stays on the +/- buttons and the wheel. Verified camera
+follow still works, a synthetic two-finger drag offsets the camera, and it eases
+back.
+
 ## 2026-09-17 — QOL: no pinch-zoom + right-click/long-press action menu — SHIPPED
 - **Pinch-to-zoom removed.** It kept firing by accident while tapping buttons on
   mobile. Two-finger touch does nothing now; zoom is the on-screen +/− buttons

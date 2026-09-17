@@ -37,6 +37,8 @@ export function unlockDoorLocal(key) { unlockedDoors.add(key); }
 const keys = new Set();
 let mouse = { sx: 0, sy: 0, gx: 0, gy: 0, over: false };
 let target = null;
+let camPan = { x: 0, y: 0 };   // two-finger pan offset (world units); eases back to the player
+let panning = false, panLast = null;
 let chase = null;        // { kind, id } — walk to this entity and attack it when in range
 let movingFurn = null;   // furniture data picked up to relocate (place on next click)
 let ctxMenu = null;      // open right-click / long-press menu element
@@ -94,23 +96,34 @@ export function initWorld(canvasEl, hooks = {}) {
     camera.zoom = clamp(camera.zoom * (e.deltaY > 0 ? 0.92 : 1.08), ZMIN, ZMAX);
   }, { passive: false });
 
-  // touch: one-finger tap acts; a still long-press opens the context menu.
-  // (Pinch-to-zoom is intentionally OFF — use the on-screen +/- buttons; it kept
-  // firing by accident while tapping buttons/menus.)
+  // iOS Safari ignores user-scalable=no, so kill its pinch-zoom gesture directly.
+  ["gesturestart", "gesturechange", "gestureend"].forEach((ev) => window.addEventListener(ev, (e) => e.preventDefault(), { passive: false }));
+
+  // touch: one-finger tap acts; still long-press opens the context menu; TWO
+  // fingers PAN the view (drag to look around) — never zoom. Zoom is +/- buttons.
   let tap = null, holdTimer = null;
   const clearHold = () => { if (holdTimer) { clearTimeout(holdTimer); holdTimer = null; } };
+  const mid = (ts) => ({ x: (ts[0].clientX + ts[1].clientX) / 2, y: (ts[0].clientY + ts[1].clientY) / 2 });
   canvas.addEventListener("touchstart", (e) => {
-    if (e.touches.length !== 1) { tap = null; clearHold(); return; }
+    if (e.touches.length >= 2) { tap = null; clearHold(); panning = true; panLast = mid(e.touches); return; }
     const t = e.touches[0]; tap = { x: t.clientX, y: t.clientY, moved: false };
     clearHold();
     holdTimer = setTimeout(() => { if (tap && !tap.moved) { openContextMenu(tap.x, tap.y); tap = null; } }, 480);
   }, { passive: false });
   canvas.addEventListener("touchmove", (e) => {
+    if (e.touches.length >= 2 && panning) {   // two-finger drag = pan the camera
+      e.preventDefault();
+      const m = mid(e.touches);
+      camPan.x -= (m.x - panLast.x) * dpr / camera.zoom;   // content follows the fingers
+      camPan.y -= (m.y - panLast.y) * dpr / camera.zoom;
+      panLast = m; return;
+    }
     if (e.touches.length === 1 && tap) { const t = e.touches[0]; if (Math.hypot(t.clientX - tap.x, t.clientY - tap.y) > 12) { tap.moved = true; clearHold(); } }
   }, { passive: false });
   canvas.addEventListener("touchend", (e) => {
     clearHold();
-    if (tap && !tap.moved && e.changedTouches.length) {
+    if (e.touches.length < 2) panning = false;
+    if (tap && !tap.moved && e.changedTouches.length && e.touches.length === 0) {
       const t = e.changedTouches[0], r = canvas.getBoundingClientRect();
       mouse.sx = (t.clientX - r.left) * dpr; mouse.sy = (t.clientY - r.top) * dpr; mouse.over = true;
       const g = screenToGrid(mouse.sx, mouse.sy, canvas); mouse.gx = Math.round(g.gx); mouse.gy = Math.round(g.gy);
@@ -537,9 +550,10 @@ function loop() {
   lastFrame = t;
   updateChase(dt); updateMe(dt); updatePeers(dt); updateNPCs(dt); updateMonsters(dt);
 
-  const tw = gridWorld(state.me.pos.x, state.me.pos.y);
-  camera.x = lerp(camera.x, tw.x, clamp(dt * 4, 0, 1));
-  camera.y = lerp(camera.y, tw.y, clamp(dt * 4, 0, 1));
+  if (!panning) { const k = Math.min(1, dt * 1.5); camPan.x -= camPan.x * k; camPan.y -= camPan.y * k; }   // ease the pan back to the player
+  const tw = gridWorld(state.me.pos.x, state.me.pos.y), tx = tw.x + camPan.x, ty = tw.y + camPan.y;
+  if (panning) { camera.x = tx; camera.y = ty; }                                  // track the drag 1:1
+  else { const k = clamp(dt * 4, 0, 1); camera.x = lerp(camera.x, tx, k); camera.y = lerp(camera.y, ty, k); }
 
   draw(t / 1000);
   requestAnimationFrame(loop);
