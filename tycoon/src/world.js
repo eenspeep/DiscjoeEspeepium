@@ -57,7 +57,6 @@ export function initWorld(canvasEl, hooks = {}) {
   window.addEventListener("keydown", (e) => {
     if (e.target.tagName === "INPUT") return;
     const k = e.key.toLowerCase();
-    if (k === "e") { doPush(); return; }
     if (k === "q") { doAttack(); return; }
     if (k === " " || k === "spacebar") { e.preventDefault(); doJump(); return; }
     if (k === "escape") { setBuild(null); return; }   // drop what's in hand
@@ -192,27 +191,21 @@ function onClick() {
   if (isWalkable(state.shared, gx, gy)) target = { x: gx, y: gy };
 }
 
-// Shove the nearest adjacent person one tile away. Works locally on bots; sends
-// a push message to real peers so their own client moves them.
-function doPush() {
-  if (!state.me.created) return;
-  const cands = [];
-  for (const [id, r] of renderPeers) cands.push({ kind: "peer", id, x: r.x, y: r.y, name: r.name });
-  for (const n of activeBots()) cands.push({ kind: "npc", ref: n, x: n.x, y: n.y, name: n.name });
-  let best = null, bd = 1.6;
-  for (const c of cands) { const d = Math.hypot(c.x - state.me.pos.x, c.y - state.me.pos.y); if (d < bd) { bd = d; best = c; } }
-  if (!best) return onTileMessage("No one close enough to shove.");
-  const dx = best.x - state.me.pos.x, dy = best.y - state.me.pos.y;
-  const sx = Math.abs(dx) >= Math.abs(dy) ? Math.sign(dx) || 1 : 0;
-  const sy = Math.abs(dy) > Math.abs(dx) ? Math.sign(dy) : 0;
-  const tx = Math.round(best.x) + sx, ty = Math.round(best.y) + sy;
-  if (!isWalkable(state.shared, tx, ty)) return onTileMessage("Nowhere to shove them.");
-  if (blockedTiles(state.shared).has(tx + "," + ty)) return onTileMessage("Something's in the way.");
-  const door = state.shared.doors[tx + "," + ty];
-  if (door && door.locked && !doorPassable(door, tx + "," + ty, state.me.id, unlockedDoors)) return onTileMessage("A locked door's in the way.");
-  if (best.kind === "npc") { best.ref.x = tx; best.ref.y = ty; best.ref.target = null; best.ref.pause = 0.6; }
-  else if (sendMsg) sendMsg({ type: "push", to: best.id, x: tx, y: ty });
-  onTileMessage("Shoved " + (best.name || "them") + "!");
+// Walking into someone shoves them: once per second per target, they slide one
+// tile in the direction you're pushing. Bots move locally; real peers get a push
+// message so their own client moves them. Their tile stays solid to you (no
+// overlap), so you bump-and-follow.
+const pushCd = new Map();   // entity id -> last shove time
+function tryCollidePush(ent, dx, dy, blocked, ents) {
+  const t = now();
+  if (t - (pushCd.get(ent.id) || 0) < 1000) return;
+  const s = state.shared, tx = Math.round(ent.x) + dx, ty = Math.round(ent.y) + dy, k = tx + "," + ty;
+  if (!isWalkable(s, tx, ty) || blocked.has(k) || ents.has(k)) return;   // nowhere to shove them
+  const door = s.doors && s.doors[k];
+  if (door && door.locked && !doorPassable(door, k, state.me.id, unlockedDoors)) return;
+  pushCd.set(ent.id, t);
+  if (ent.kind === "bot") { ent.ref.x = tx; ent.ref.y = ty; ent.ref.target = null; ent.ref.pause = 0.6; }
+  else if (sendMsg) sendMsg({ type: "push", to: ent.id, x: tx, y: ty });
 }
 
 // Swing your equipped weapon at the nearest adjacent entity. Instant kill if
@@ -318,6 +311,9 @@ function updateMe(dt) {
 
   const f = state.shared.floor, walk = walkableSet(state.shared), blocked = blockedTiles(state.shared), ents = entityTileSet();
   const doors = state.shared.doors || {};
+  const entAt = new Map();   // tile -> who's standing there, so a collision can shove them
+  for (const [id, r] of renderPeers) entAt.set(Math.round(r.x) + "," + Math.round(r.y), { kind: "peer", id, x: r.x, y: r.y });
+  for (const n of activeBots()) entAt.set(Math.round(n.x) + "," + Math.round(n.y), { kind: "bot", id: n.id, ref: n, x: n.x, y: n.y });
   const jumping = now() < (state.jumpPassUntil || 0);
   const solid = (gx, gy) => {
     const k = gx + "," + gy;
@@ -334,6 +330,14 @@ function updateMe(dt) {
     }
     return false;
   };
+  // walk toward someone in the next tile over → shove them that way (throttled)
+  if (want) {
+    const pdx = vx > 1e-4 ? 1 : vx < -1e-4 ? -1 : 0, pdy = vy > 1e-4 ? 1 : vy < -1e-4 ? -1 : 0;
+    if (pdx || pdy) {
+      const ent = entAt.get((Math.round(me.pos.x) + pdx) + "," + (Math.round(me.pos.y) + pdy));
+      if (ent) tryCollidePush(ent, pdx, pdy, blocked, ents);
+    }
+  }
   let nx = me.pos.x + vx, ny = me.pos.y + vy, movedX = vx !== 0, movedY = vy !== 0;
   if (vx !== 0 && solid(Math.round(nx), Math.round(me.pos.y))) { nx = me.pos.x; movedX = false; }
   if (vy !== 0 && solid(Math.round(nx), Math.round(ny))) { ny = me.pos.y; movedY = false; }

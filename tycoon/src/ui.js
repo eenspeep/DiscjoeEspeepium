@@ -154,7 +154,7 @@ function renderHud() {
       el("button", { class: "btn" + (openView === "shop" ? " alert" : ""), onclick: toggleShop }, ["🛒 Shop"]),
       el("button", { class: "btn", onclick: toggleLocker }, ["Locker"]),
       el("button", { class: "btn" + (voting ? " alert" : ""), onclick: togglePot }, [voting ? "Vote!" : "Team Pot"]),
-      el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · E shove · Q attack (need a weapon in hand) · click a 📦 to grab loot · stand by furniture to use it"), title: "Help" }, ["?"]),
+      el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · Space jump · Q attack (need a weapon in hand) · walk into someone to shove them · click a 📦 to grab loot · stand by furniture to use it"), title: "Help" }, ["?"]),
     ])
   );
 }
