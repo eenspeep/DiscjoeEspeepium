@@ -304,12 +304,14 @@ function buildTick(dt) {
     const [gx, gy] = key.split(",").map(Number);
     if (!isNearFootprint(me.pos, site.type, gx, gy, bReach)) continue;
     contribute(key, round2(power * dt));   // my build contribution (batched to the host)
-    // only the host turns a finished site into furniture (single authority)
-    if (state.isHost && siteProgress(site) >= site.work) {
-      if (!s.furniture[key]) s.furniture[key] = { type: site.type, level: 1, by: Object.keys(site.progBy || {}), rot: site.rot || 0, paidBy: site.paidBy || null };
-      delete s.sites[key];
+    // Completion is an idempotent op so it fires on whoever is standing here,
+    // host or not (a guest relays it; applyOp no-ops if it's already built). This
+    // is what stops a site from accruing past its work total and never building
+    // when you aren't the authoritative host.
+    if (siteProgress(site) >= site.work && !s.furniture[key]) {
+      sharedOp({ t: "furnDone", key });
       state.justBuilt = FURNITURE[site.type] ? FURNITURE[site.type].name : site.type;
-      flushShared(true);
+      if (state.isHost) flushShared(true);
     }
   }
 
@@ -373,6 +375,12 @@ export function applyOp(s, op) {
     case "site-": delete s.sites[op.key]; break;
     case "furn+": s.furniture[op.key] = op.val; break;
     case "furn-": delete s.furniture[op.key]; break;
+    case "furnDone": {   // a construction site finished -> turn it into furniture (idempotent)
+      const st = s.sites[op.key];
+      if (st && !s.furniture[op.key]) s.furniture[op.key] = { type: st.type, level: 1, by: Object.keys(st.progBy || {}), rot: st.rot || 0, paidBy: st.paidBy || null };
+      if (st) delete s.sites[op.key];
+      break;
+    }
     case "furnLvl": if (s.furniture[op.key]) s.furniture[op.key].level = op.level; break;
     case "furnBroken": if (s.furniture[op.key]) s.furniture[op.key].broken = op.val; break;
     case "mod+": { const f = s.furniture[op.key]; if (f) { f.mods = f.mods || {}; f.mods[op.mk] = op.mod; } break; }
