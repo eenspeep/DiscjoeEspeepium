@@ -32,10 +32,41 @@ export const STATS = {
   brain: { label: "BRAIN", glyph: "🧠", tint: "#4b56b8" },
   build: { label: "BUILD", glyph: "🔧", tint: "#c9772f" },
 };
+// Three specialties, one per furniture role. A matching specialty DOUBLES that
+// role (see roleMult). "brain" is kept as an alias of "research" for old saves.
 export const SPECIALTIES = {
-  brain: { id: "brain", name: "JOE BRAIN", glyph: "🧠", tint: "#4b56b8", start: { brain: 3, build: 1 }, blurb: "Big ideas. BRAIN gear and furniture work harder, and you research faster." },
-  build: { id: "build", name: "JOE BUILD", glyph: "🔧", tint: "#c9772f", start: { brain: 1, build: 3 }, blurb: "Big hands. BUILD gear and furniture work harder, and you build faster." },
+  gold: { id: "gold", name: "JOE GOLD", glyph: "💰", tint: "#d4a72c", start: { brain: 1, build: 1 }, blurb: "Money magnet. Gold furniture pays you double." },
+  build: { id: "build", name: "JOE BUILD", glyph: "🔧", tint: "#c9772f", start: { brain: 1, build: 3 }, blurb: "Big hands. Build furniture works double, so you build twice as fast." },
+  research: { id: "research", name: "JOE BRAIN", glyph: "🔬", tint: "#4b56b8", start: { brain: 3, build: 1 }, blurb: "Big ideas. Research furniture works double, so you research twice as fast." },
 };
+// A furniture's job, derived from its (legacy) tag: gold multiplies income,
+// build adds build speed, research adds research speed.
+export const ROLE_OF = { neutral: "gold", build: "build", brain: "research" };
+export const ROLE_META = {
+  gold: { label: "Gold", glyph: "💰", tint: "#d4a72c" },
+  build: { label: "Build", glyph: "🔧", tint: "#c9772f" },
+  research: { label: "Research", glyph: "🔬", tint: "#4b56b8" },
+};
+export function roleOf(type) { const d = FURNITURE[type]; return d ? (ROLE_OF[d.tag] || "gold") : "gold"; }
+// Which role a Joey's specialty doubles ("brain" is the old name for research).
+export function specRole(me) {
+  const s = me && me.specialty;
+  if (s === "build") return "build";
+  if (s === "brain" || s === "research") return "research";
+  if (s === "gold" || s === "neutral") return "gold";
+  return null;
+}
+// A player's multiplier on a given role: 2x if it's their specialty, plus a
+// small per-point bump from the matching stat (build stat -> build furniture,
+// brain stat -> research furniture) so stat adjectives still matter. Gold has no
+// stat, only the specialty doubling.
+export function roleMult(me, role) {
+  let m = (specRole(me) === role) ? 2 : 1;
+  const st = me && me.stats;
+  if (role === "build") m *= 1 + TUNING.statItemScale * ((st && st.build) || 0);
+  else if (role === "research") m *= 1 + TUNING.statItemScale * ((st && st.brain) || 0);
+  return m;
+}
 // ---- traits (adjective modifiers) -----------------------------------------
 // Every adjective grants one or more of these at an integer "amount" that is
 // the level (build 1/2/3 = stronger). Wired into the engine through traitVal()
@@ -154,7 +185,7 @@ export function rollAdjectives(n, excludeWords = []) {
   return out;
 }
 export function buildStats(specialtyId, adj) {
-  const spec = SPECIALTIES[specialtyId] || SPECIALTIES.brain;
+  const spec = SPECIALTIES[specialtyId] || SPECIALTIES.research;
   const stats = { brain: spec.start.brain, build: spec.start.build };
   const traits = {};
   if (adj) {
@@ -201,6 +232,12 @@ export const FURNITURE_ORDER = Object.keys(FURNITURE).sort((a, b) => FURNITURE[a
 
 export function countOfType(shared, type) { return Object.values(shared.furniture).filter((f) => f.type === type).length; }
 export function furnitureValue(f) { const d = FURNITURE[f.type]; return d.unit * tierPower(d.tier) * (1 + 0.5 * (f.level - 1)); }
+// Role effects of one piece for a given Joey (0 unless it's that role):
+// gold -> a % added to the income multiplier; build -> build power; research -> RP/s.
+export function goldPctOf(f, me) { return roleOf(f.type) === "gold" ? furnitureValue(f) * roleMult(me, "gold") : 0; }
+function tierTerm(d, f) { return (d.tier + 0.5 * ((f.level || 1) - 1)); }
+export function buildAddOf(f, me) { const d = FURNITURE[f.type]; return roleOf(f.type) === "build" ? TUNING.buildFurnScale * tierTerm(d, f) * roleMult(me, "build") : 0; }
+export function researchAddOf(f, me) { const d = FURNITURE[f.type]; return roleOf(f.type) === "research" ? TUNING.researchScale * tierTerm(d, f) * roleMult(me, "research") : 0; }
 export function furnitureBaseCost(type) { const d = FURNITURE[type]; return d.costUnit * tierCost(d.tier); }
 export function furnitureBuyCost(shared, type) { return Math.ceil(furnitureBaseCost(type) * Math.pow(1.15, countOfType(shared, type))); }
 export function upgradeCost(f) { return Math.ceil(furnitureBaseCost(f.type) * 0.5 * Math.pow(1.5, f.level - 1)); }
@@ -521,13 +558,6 @@ export function petSoulMult(me) { return petActive(me) ? TUNING.petSoulMult : 1;
 
 // ---- income + effects -----------------------------------------------------
 
-export function statScales(me) {
-  const s = me.stats || { brain: 0, build: 0 };
-  const brain = (1 + TUNING.statItemScale * s.brain) * (me.specialty === "brain" ? 1 + TUNING.specialtyItemBonus : 1);
-  const build = (1 + TUNING.statItemScale * s.build) * (me.specialty === "build" ? 1 + TUNING.specialtyItemBonus : 1);
-  return { brain, build };
-}
-function scaleByTag(v, tag, sc) { return tag === "brain" ? v * sc.brain : tag === "build" ? v * sc.build : v; }
 function itemValue(def) { return def.value ? def.value * tierPower(def.tier) : 0; }
 
 export function equippedDefs(me) {
@@ -555,12 +585,15 @@ export function gearWorn(gear) {
   for (const [slot, type] of Object.entries(gear || {})) if (ITEMS[type]) out[slot] = { art: ITEMS[type].art, color: ITEMS[type].color };
   return out;
 }
+// Income is MULTIPLICATIVE now: your raw gold (base + gear value + income node
+// mods) is multiplied by your gold-furniture multiplier and your gear/percent
+// multipliers. Build/research furniture no longer pay gold — they give speed.
 export function income(me, shared, { passiveOnly = false } = {}) {
-  const sc = statScales(me);
-  let flat = TUNING.baseIncome + TUNING.statFlat * ((me.stats?.brain || 0) + (me.stats?.build || 0));
-  let multPct = 0.08 * traitVal(me, "income");   // "Income" trait
+  let flat = TUNING.baseIncome;                 // raw gold, before multipliers
+  let goldMult = 0;                              // from gold furniture (multiplies flat)
+  let multPct = 0.08 * traitVal(me, "income");   // gear %, pot buff, "Income" trait
   for (const def of equippedDefs(me)) {
-    if (def.value) flat += scaleByTag(itemValue(def), def.tag, sc);
+    if (def.value) flat += itemValue(def);       // gear value = flat raw gold
     if (def.mult) multPct += def.mult;
   }
   if (!passiveOnly && shared && shared.furniture && me.pos) {
@@ -569,13 +602,13 @@ export function income(me, shared, { passiveOnly = false } = {}) {
       if (f.broken) continue;   // rat-mauled furniture pays nothing until repaired
       const [gx, gy] = key.split(",").map(Number);
       if (isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) {
-        flat += scaleByTag(furnitureValue(f), FURNITURE[f.type].tag, sc);
-        flat += modBonusOf(f).income; // node mods (plants) = flat income
+        goldMult += goldPctOf(f, me);            // gold furniture = a multiplier
+        flat += modBonusOf(f).income;            // income node mods = flat gold (gets multiplied)
       }
     }
   }
   if (shared && shared.pot && shared.pot.roomBuff && shared.pot.roomBuff.incomeMult) multPct += shared.pot.roomBuff.incomeMult;
-  return Math.round(flat * (1 + multPct) * 100) / 100;
+  return Math.round(flat * (1 + goldMult + multPct) * 100) / 100;
 }
 export function effectiveSpeedMult(me) {
   let m = 1 + 0.12 * traitVal(me, "speed");   // "Move speed" trait
@@ -686,24 +719,30 @@ export function doorPassable(door, key, meId, unlocked) {
 // ---- BUILD + BRAIN --------------------------------------------------------
 
 export function buildPower(me, shared) {
-  let p = TUNING.baseBuild + TUNING.buildScale * ((me.stats && me.stats.build) || 0);
+  let p = TUNING.baseBuild;
   p += 0.5 * traitVal(me, "build");   // "Build speed" trait
   for (const def of equippedDefs(me)) if (def.buildBonus) p += def.buildBonus;
-  if (shared) p += nearbyModBonus(me, shared).build; // node mods (tools) = flat build
+  if (shared && shared.furniture && me.pos) {
+    const range = interactRange(me);
+    for (const [key, f] of Object.entries(shared.furniture)) {
+      if (f.broken) continue;
+      const [gx, gy] = key.split(",").map(Number);
+      if (isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) p += buildAddOf(f, me);   // build furniture = build speed
+    }
+    p += nearbyModBonus(me, shared).build; // node mods (tools) = flat build
+  }
   return p;
 }
 export function rpRate(me, shared) {
   if (!shared || !shared.furniture || !me.pos) return 0;
-  const brain = (me.stats && me.stats.brain) || 0, range = interactRange(me);
+  const range = interactRange(me);
   let rp = 0;
   for (const [key, f] of Object.entries(shared.furniture)) {
     if (f.broken) continue;
     const [gx, gy] = key.split(",").map(Number);
-    const def = FURNITURE[f.type];
     if (!isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) continue;
-    // research scales with the furniture's TIER (not its factorial income).
-    if (def.tag === "brain") rp += (def.tier + 0.5 * (f.level - 1)) * TUNING.researchScale * (1 + brain * TUNING.researchStatBonus);
-    rp += modBonusOf(f).research; // node mods (lamps) = flat research
+    rp += researchAddOf(f, me);      // research furniture = research speed
+    rp += modBonusOf(f).research;    // node mods (lamps) = flat research
   }
   for (const def of equippedDefs(me)) if (def.researchBonus) rp += def.researchBonus;
   rp *= 1 + 0.15 * traitVal(me, "research");   // "Research speed" trait

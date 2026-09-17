@@ -4,6 +4,33 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Furniture roles: Gold / Build / Research — SHIPPED
+Replaced the brain/build/neutral tags (which just scaled income off stats) with
+three functional roles, each doing a distinct job:
+- **Gold** (was neutral): multiplies your income. Its node-mod surfaces still
+  take flat-income nodes, and those flat nodes get multiplied too ("room for
+  nodes"). Income is now `(base + gear value + income nodes) × (1 + Σ gold
+  furniture % + gear %)`. A gold piece's percentage is its old flat value, so
+  numbers stay close (a lone snacktable is still ~+7%). Build/research furniture
+  no longer pay any gold.
+- **Build** (unchanged tag): adds build power to anyone next to it
+  (`buildFurnScale × tier`), so sites and gear finish faster.
+- **Research** (was brain): adds RP/s to anyone next to it (`researchScale ×
+  tier`).
+
+Specialty is now a clean **2× modifier** on its matching role (not the old +
+bonuses), and there are three of them: JOE GOLD, JOE BUILD, JOE BRAIN
+(research). Brain/Build stat points keep a small per-point bump on their role
+(build stat → build furniture, brain stat → research furniture) so stat
+adjectives still matter; gold has no stat, only the 2× from the Gold specialty.
+Old saves with `specialty:"brain"` map to research (`specRole`), so nothing
+crashes. Shop rows, the furniture inspector, gear tooltips, and furniture tints
+(gold = amber) all show the role. Verified: income multiplies and the Gold
+specialty doubles it, build/research furniture raise build/research and their
+specialties double them, roles resolve, creator shows three cards, no page
+errors. Tuning note: high-tier gold reads as a huge % (Espresso Bar = +1300%)
+because the old power curve is factorial — accurate, just loud.
+
 ## 2026-09-17 — Build completion works off-host + L-desk renders L — SHIPPED
 - **Sites never finishing (e.g. the altar "goes over the max and never builds").**
   Completion was gated on `state.isHost`, so a site's progress accrued past its

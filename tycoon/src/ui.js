@@ -13,7 +13,7 @@ import {
 } from "./state.js";
 import {
   FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost, furnitureValue,
-  roomCost, canAddRoom, tileCost, canBuyTiles, isProtected, statScales, SPECIALTIES, ADJECTIVES, adjSummary, rollAdjectives, RARITY, STATS,
+  roomCost, canAddRoom, tileCost, canBuyTiles, isProtected, roleOf, ROLE_META, goldPctOf, buildAddOf, researchAddOf, specRole, SPECIALTIES, ADJECTIVES, adjSummary, rollAdjectives, RARITY, STATS,
   PROPOSALS, proposalById, voteWeight,
   ITEMS, ITEM_SLOTS, SLOT_LABEL, shopByTier, itemPrice, itemCells, bagGrid, bagFreeCells,
   furnitureTier, itemTier, furnitureWork, itemWork, tierUnlocked,
@@ -199,6 +199,16 @@ function takeDoor() { setBuildDoor(true); flash("Holding a door — click any fl
 function takeWall(type) { setBuildWall(type); flash("Holding " + WALL_DECOR[type].name + " — aim at a wall within reach and click."); closePanel(); renderBuildbar(); }
 function takeExpand() { setBuildExpand(true); flash("Expand mode — walk to your office edge and click the glowing fog to claim floor."); closePanel(); renderBuildbar(); }
 
+// One-line effect string for a furniture piece, in its role's terms. Pass a
+// real `me` for "your" numbers (specialty x2 + stats), or {} for base preview.
+function furnEffect(ty, f, me) {
+  const d = FURNITURE[ty], role = roleOf(ty);
+  if (d.ratSpawner) return "🐀 spawns rats";
+  if (role === "gold") return "💰 +" + Math.round(goldPctOf(f, me) * 100) + "% gold";
+  if (role === "build") return "🔧 +" + (Math.round(buildAddOf(f, me) * 100) / 100) + " build";
+  return "🔬 +" + (Math.round(researchAddOf(f, me) * 100) / 100) + " rp/s";
+}
+
 function renderShop() {
   const s = state.shared, me = state.me, kids = [panelHeader("🛒 Shop")];
   kids.push(el("p", { class: "muted small", text: "Pick something to hold, then click a tile within reach to place it. You keep holding it, so you can drop several." }));
@@ -239,8 +249,7 @@ function renderShop() {
       kids.push(el("div", { class: "tier-head", text: "Tier " + t + " · " + TIER_NAME[t] }));
       for (const ty of types) {
         const def = FURNITURE[ty], esoReq = esoOfFurniture(ty), cost = furnitureBuyCost(s, ty);
-        const val = Math.round(furnitureValue({ type: ty, level: 1 }) * 100) / 100;
-        const meta = def.ratSpawner ? "spawns rats every 10 min (upgrade = more)" : (def.soul ? "channel SOUL · " : "") + def.tag.toUpperCase() + " +" + fmt(val) + "/s · " + furnitureWork(ty) + "w";
+        const meta = def.ratSpawner ? "spawns rats every 10 min (upgrade = more)" : (def.soul ? "channel SOUL · " : "") + furnEffect(ty, { type: ty, level: 1 }, {}) + " · " + furnitureWork(ty) + "w";
         if (esoReq > currentEso(me)) {
           kids.push(shopRow("🔮", def.name, "🔮 " + ESO_NAME[esoReq] + " soul needed", cost, false, () => flash(def.name + " needs " + ESO_NAME[esoReq] + " soul. Channel at an esoteric altar."), "eso-locked"));
         } else {
@@ -260,8 +269,7 @@ function renderShop() {
 export function openFurniture(key, f) { openKey = key; openView = "furn"; setSelected(key); setBuild(null); renderBuildbar(); renderFurniture(); showPanel(); }
 function renderFurniture() {
   const f = state.shared.furniture[openKey]; if (!f) return closePanel();
-  const def = FURNITURE[f.type], sc = statScales(state.me), raw = furnitureValue(f);
-  const mine = def.tag === "brain" ? raw * sc.brain : def.tag === "build" ? raw * sc.build : raw;
+  const def = FURNITURE[f.type], role = roleOf(f.type);
   const up = upgradeCost(f);
   const [gx, gy] = openKey.split(",").map(Number);
   const prot = isProtected(state.shared, gx, gy);
@@ -277,10 +285,10 @@ function renderFurniture() {
 
   panel.replaceChildren(
     panelHeader(def.glyph + " " + def.name),
-    el("p", { class: "muted small", text: def.ratSpawner ? "Spawns " + f.level + " rat" + (f.level > 1 ? "s" : "") + " every 10 min. Upgrade for more." : def.tag.toUpperCase() + " furniture. Buffs anyone standing next to it." }),
+    el("p", { class: "muted small", text: def.ratSpawner ? "Spawns " + f.level + " rat" + (f.level > 1 ? "s" : "") + " every 10 min. Upgrade for more." : (ROLE_META[role].label + " furniture — " + (role === "gold" ? "multiplies the gold of anyone standing next to it." : role === "build" ? "speeds up building for anyone next to it." : "speeds up research for anyone next to it.")) }),
     f.broken ? el("p", { class: "broken-note small", text: "🐀 In disrepair after a rat attack — earns nothing until repaired." }) : null,
     prot ? el("p", { class: "muted small", text: iPaid ? "🛡️ Protected room — anyone can sell this, and the refund comes back to you (you paid for it)." : "🛡️ Protected room — anyone can sell this, and the refund goes back to whoever paid for it." }) : null,
-    stat("Level", String(f.level)), stat("Base value", "+" + fmt(raw) + "/s"), stat("For you (stats)", "+" + fmt(Math.round(mine * 100) / 100) + "/s"),
+    stat("Level", String(f.level)), stat("Base", furnEffect(f.type, { type: f.type, level: f.level }, {})), stat("For you", furnEffect(f.type, f, state.me)),
     el("div", { class: "panel-actions" }, actions)
   );
 }
@@ -350,7 +358,7 @@ function itemBuffText(def) {
   if (def.weapon) return "🔪 instant kill · " + def.uses + " use" + (def.uses > 1 ? "s" : "");
   if (def.leash) return "🪢 leash a tired rat · x1.2 soul · +1 armor";
   if (def.shield) return "🛡️ blocks 1 hit";
-  if (def.value) return "+" + fmt(Math.round(def.value * tierPower(def.tier) * 100) / 100) + "/s" + (def.tag && def.tag !== "neutral" ? " " + def.tag[0].toUpperCase() : "");
+  if (def.value) return "💰 +" + fmt(Math.round(def.value * tierPower(def.tier) * 100) / 100) + "/s";
   if (def.mult) return "+" + Math.round(def.mult * 100) + "%";
   if (def.speedMult) return "+" + Math.round(def.speedMult * 100) + "% spd";
   if (def.buildBonus) return "+" + def.buildBonus + " build";
@@ -361,7 +369,7 @@ function itemBuffText(def) {
 }
 
 function renderLocker() {
-  const me = state.me, spec = SPECIALTIES[me.specialty];
+  const me = state.me, spec = SPECIALTIES[me.specialty] || SPECIALTIES[specRole(me)] || SPECIALTIES.gold;
   // drop a stale selection once the item leaves the bag (equipped or sold)
   if (selBagItem && !me.bag.placements[selBagItem]) selBagItem = null;
   const kids = [panelHeader("🧳 " + me.name)];

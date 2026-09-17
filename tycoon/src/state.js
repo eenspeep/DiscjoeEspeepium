@@ -138,7 +138,7 @@ export function createJoey({ specialty, adjectiveWord, look }) {
   const me = state.me;
   const adj = ADJECTIVES.find((a) => a.word === adjectiveWord);
   const { stats, traits } = buildStats(specialty, adj);
-  me.specialty = SPECIALTIES[specialty] ? specialty : "brain";
+  me.specialty = SPECIALTIES[specialty] ? specialty : "research";
   me.adjectiveWord = adjectiveWord;
   me.name = "JOEY " + adjectiveWord;
   me.stats = stats; me.traits = traits;

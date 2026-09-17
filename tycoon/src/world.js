@@ -755,7 +755,8 @@ function drawWall(gx, gy, side, w) {
   ctx.fillText(def.glyph, c.x, c.y + 0.5 * Z);
 }
 
-const TAG_TINT = { brain: "#4b56b8", build: "#c9772f", neutral: "#7f8794" };
+// tint by role (tag is the legacy key): research blue, build orange, gold gold.
+const TAG_TINT = { brain: "#4b56b8", build: "#c9772f", neutral: "#d4a72c" };
 
 // ---- furniture models -----------------------------------------------------
 // Each piece is drawn as shaped isometric volumes (a body of boxes plus a few
