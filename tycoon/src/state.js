@@ -14,9 +14,9 @@ import {
   furnitureWork, itemWork, itemPrice, isFurnitureUnlocked, isItemUnlocked,
   buildPower, rpRate, soulRate, siteProgress, isNearFootprint,
   currentTier, currentEso, furnitureTier, itemTier, esoOfFurniture, esoOfItem,
-  footprintCells, blockedTiles, furnitureAnchorAt, hasSurface, isModUnlocked, modPrice,
+  footprintCells, blockedTiles, furnitureAnchorAt, hasSurface, nodeCap, utilOf, roleOf, isModUnlocked, modPrice,
   equippedWeapon, lowestShield, equippedShields, blackMarkCells,
-  buildRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal, withinReach, repairCost,
+  buildRange, interactRange, discountFrac, refundFrac, killFreebies, weaponBonus, traitVal, withinReach, repairCost,
   hasLeash, petActive, enzoPetValue,
   WALL_DECOR, wallPrice, isWallUnlocked, wallIsReal,
   tileCost, canBuyTiles, isBuyableTile,
@@ -339,13 +339,14 @@ export function tickEconomy() {
       buildTick(dt);
     }
     me.lastSeen = t;
-    if (hasPower(me, "magnetic")) magnetPull();   // Magnetic: nearby loot flies into the bag
+    if (hasPower(me, "magnetic") || nearUtil(me, "magnet")) magnetPull();   // Magnetic power OR standing by a magnet-util piece
     if (t - lastContribFlush > 750) { lastContribFlush = t; flushContrib(); }   // batch build/research to the host
     claimOwed();
   }
   potTick(t);
   charlieTick(t);
   monsterTick(t);
+  repairTick(t);
 }
 
 // Advance construction sites you're helping, research from BRAIN furniture, and
@@ -589,6 +590,7 @@ export function tryPlaceMod(modType, gx, gy) {
   f.mods = f.mods || {};
   const mk = gx + "," + gy;
   if (f.mods[mk]) return { ok: false, why: "There's already a mod there." };
+  if (Object.keys(f.mods).length >= nodeCap(f.type)) return { ok: false, why: "All node slots on this piece are full." };
   const price = modPrice(modType);
   if (state.me.credits < price) return { ok: false, why: "Not enough credits." };
   spend(price); sharedOp({ t: "mod+", key: fKey, mk, mod: modType }); commit();
@@ -868,6 +870,33 @@ export function tryPickup(gx, gy) {
   if (left.length) pile.items = left; else delete s.loot[key];
   state.meDirty = true; commit();
   return { ok: taken.length > 0, taken: taken.length, left: left.length };
+}
+
+// Is a working utility piece of `kind` within reach of me? (util furniture auras)
+function nearUtil(me, kind) {
+  const s = state.shared; if (!s || !s.furniture || !me.pos) return false;
+  const range = interactRange(me);
+  for (const [key, f] of Object.entries(s.furniture)) {
+    if (f.broken || utilOf(f.type) !== kind) continue;
+    const [gx, gy] = key.split(",").map(Number);
+    if (isNearFootprint(me.pos, f.type, gx, gy, range, f.rot || 0)) return true;
+  }
+  return false;
+}
+// Host: "repair"-util pieces slowly un-break nearby rat-mauled furniture (one per pass).
+let lastRepair = 0;
+function repairTick(t) {
+  if (!state.isHost) return;
+  if (t - lastRepair < 4000) return; lastRepair = t;
+  const s = state.shared; if (!s || !s.furniture) return;
+  const menders = [];
+  for (const [key, f] of Object.entries(s.furniture)) if (!f.broken && utilOf(f.type) === "repair") { const [x, y] = key.split(",").map(Number); menders.push([x, y]); }
+  if (!menders.length) return;
+  for (const [key, f] of Object.entries(s.furniture)) {
+    if (!f.broken) continue;
+    const [x, y] = key.split(",").map(Number);
+    if (menders.some(([mx, my]) => Math.max(Math.abs(mx - x), Math.abs(my - y)) <= 2)) { sharedOp({ t: "furnBroken", key, val: false }); break; }
+  }
 }
 
 // "Magnetic" power: sweep nearby loot piles straight into the bag each tick.

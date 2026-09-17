@@ -55,6 +55,7 @@ export const ROLE_META = {
 // utility. A piece flagged `hybrid` pays half of two roles (its own `roles`).
 export function roleOf(type) {
   const d = FURNITURE[type]; if (!d) return "gold";
+  if (d.role) return d.role;            // explicit override (utility pieces)
   if (d.hybrid) return "hybrid";
   if (d.soul) return "soul";
   if (d.ratSpawner) return "utility";
@@ -309,6 +310,89 @@ export const FURNITURE = {
   // spawn more. Rats attack the nearest player or furniture. (See state.monsters.)
   ratmotel: { name: "Rat Motel", glyph: "🏚️", tag: "neutral", tier: 3, unit: 0, costUnit: 2.2, h: 16, ratSpawner: true },
 };
+
+// ---- expansion: 100 pieces, 10 per tier, generic -> esoteric ---------------
+// Compact spec: [tier, key, name, glyph, role, eso, nodes, util?]. Footprint is
+// derived from node count (beds are bigger). See FURNITURE_PROPOSAL.md.
+//   role: G gold · B build · R research · S soul · U utility(node bed/effect) ·
+//         Hxy hybrid of two of g/b/r (half each, costs more)
+const NEW_FURN = [
+  // Tier 1 — Supply Closet
+  [1,"t1a","Folding Table","🪑","G",0,3],[1,"t1b","Water Cooler","🧊","G",0,0],
+  [1,"t1c","Supply Shelf","🗄️","U",0,4],[1,"t1d","Cork Board","📌","R",0,2],
+  [1,"t1e","Beat-up Toolbox","🧰","B",0,2],[1,"t1f","Mop & Bucket","🧹","U",0,0,"repair"],
+  [1,"t1g","Vending Machine","🥤","G",1,1],[1,"t1h","Lost & Found Bin","📦","U",1,1],
+  [1,"t1i","Planchette Coaster","🪬","S",2,0],[1,"t1j","Bigger-Inside Closet","🚪","Hgr",3,2],
+  // Tier 2 — Break Room
+  [2,"t2a","Break Table","🍽️","G",0,4],[2,"t2b","Drip Coffee Maker","☕","B",0,1],
+  [2,"t2c","Microwave","📟","G",0,0],[2,"t2d","Magazine Rack","📰","R",0,2],
+  [2,"t2e","Snack Pantry","🍫","U",0,3],[2,"t2f","Recycling Station","♻️","U",1,1,"magnet"],
+  [2,"t2g","Foosball Table","🎱","G",1,0],[2,"t2h","Fortune Teller","🔮","R",2,1],
+  [2,"t2i","Cursed Fridge","🧟","S",2,1],[2,"t2j","Perpetual Stew Cauldron","🍲","S",3,2],
+  // Tier 3 — Cubicle Farm
+  [3,"t3a","Cubicle Desk","🖥️","G",0,2],[3,"t3b","Ergonomic Chair","💺","B",0,0],
+  [3,"t3c","Filing Cabinet","🗃️","U",0,4],[3,"t3d","Desktop Terminal","💻","R",0,1],
+  [3,"t3e","Standing Desk Riser","🧍","B",0,2],[3,"t3f","Poster Wall","🖼️","G",1,3],
+  [3,"t3g","Paper Shredder","🗑️","U",1,1],[3,"t3h","Executive Aquarium","🐠","G",2,1],
+  [3,"t3i","Whispering Cubicle","👂","S",2,1],[3,"t3j","Non-Euclidean Nap Pod","🛌","Hgb",3,1],
+  // Tier 4 — Server Room
+  [4,"t4a","Patch-Panel Desk","🔌","R",0,3],[4,"t4b","Rack-Mount Server","🖲️","R",0,1],
+  [4,"t4c","UPS Battery Bank","🔋","B",0,2],[4,"t4d","Cable Spool Table","🧵","G",0,4],
+  [4,"t4e","Cooling Fan Wall","🌀","U",0,0,"repair"],[4,"t4f","Crypto Miner Rig","⛏️","G",1,1],
+  [4,"t4g","Backup Tape Vault","💽","U",1,3],[4,"t4h","Rogue AI Sandbox","🤖","R",2,1],
+  [4,"t4i","Haunted Mainframe","👾","S",2,1],[4,"t4j","Quantum Blade Server","🌌","Hgr",3,2],
+  // Tier 5 — R&D Lab
+  [5,"t5a","Lab Bench","🧪","R",0,4],[5,"t5b","Fume Hood","🌫️","R",0,1],
+  [5,"t5c","Machine Lathe","⚙️","B",0,2],[5,"t5d","Espresso Lab Rig","☕","G",0,1],
+  [5,"t5e","Sample Freezer","🧊","U",0,3],[5,"t5f","Prototype Assembler","🛠️","B",1,1],
+  [5,"t5g","Grant Money Printer","💵","G",1,0],[5,"t5h","Cryo-Sleep Chamber","❄️","U",2,1],
+  [5,"t5i","Alchemist's Still","⚗️","S",2,2],[5,"t5j","Schrödinger's Incubator","🥚","Hgr",3,1],
+  // Tier 6 — Innovation Wing
+  [6,"t6a","Brainstorm Pod","💡","R",0,3],[6,"t6b","Modular Maker Bench","🔧","B",0,4],
+  [6,"t6c","Investor Pitch Stage","🎤","G",0,1],[6,"t6d","3D Resin Printer","🖨️","B",0,1],
+  [6,"t6e","Idea Whiteboard Cube","📊","R",0,2],[6,"t6f","Kombucha Tap Wall","🍵","G",1,2],
+  [6,"t6g","Drone Charging Nest","🚁","U",1,1,"magnet"],[6,"t6h","Meditation Egg","🧘","S",2,0],
+  [6,"t6i","Idea Siphon","🌪️","R",2,1],[6,"t6j","Möbius Conveyor","♾️","Hgb",3,2],
+  // Tier 7 — Skunkworks
+  [7,"t7a","Classified Workbench","🗂️","B",0,4],[7,"t7b","Wind Tunnel","🌬️","R",0,1],
+  [7,"t7c","Black-Budget Safe","🔒","G",0,2],[7,"t7d","Robotic Arm Cell","🦾","B",0,1],
+  [7,"t7e","Signals Intercept Rack","📡","R",0,3],[7,"t7f","Stealth Coating Vat","🛡️","U",1,1],
+  [7,"t7g","Jetpack Dock","🚀","G",1,0],[7,"t7h","Isolation Tank","🌊","S",2,1],
+  [7,"t7i","Reverse-Engineering Bay","🔬","R",2,2],[7,"t7j","Antigravity Test Rig","🛸","Hbr",3,1],
+  // Tier 8 — Moonshot Floor
+  [8,"t8a","Mission Control Desk","🕹️","R",0,4],[8,"t8b","Clean-Room Assembler","🧑‍🔬","B",0,2],
+  [8,"t8c","Venture Fund Vault","🏦","G",0,1],[8,"t8d","Fusion Prototype","⚛️","B",0,1],
+  [8,"t8e","Orbital Comms Array","🛰️","R",0,3],[8,"t8f","Hydroponic Money Tree","🌳","G",1,3],
+  [8,"t8g","Cryonics Ward","⚰️","U",1,1],[8,"t8h","Astral Projection Rig","🌌","S",2,0],
+  [8,"t8i","Dyson Swarm Model","☀️","R",2,1],[8,"t8j","Wormhole Prototype","🕳️","Hgr",3,2],
+  // Tier 9 — The Singularity Lab
+  [9,"t9a","Neural-Net Terminal","🧠","R",0,3],[9,"t9b","Nanofab Cradle","🔩","B",0,2],
+  [9,"t9c","Autonomous Trading Desk","📈","G",0,1],[9,"t9d","Self-Assembling Scaffold","🏗️","B",0,4],
+  [9,"t9e","Digital Twin Rack","👥","R",0,2],[9,"t9f","Attention Engine","👁️","G",1,1],
+  [9,"t9g","Uploaded-Intern Server","🧟","U",1,2,"magnet"],[9,"t9h","Egregore Vat","🌀","S",2,1],
+  [9,"t9i","Recursive Idea Foundry","🔁","R",2,2],[9,"t9j","Basilisk Shrine","🐍","S",3,1],
+  // Tier 10 — Post-Work Reality
+  [10,"t10a","Infinite Desk","♾️","G",0,5],[10,"t10b","Matter Compiler","🧱","B",0,2],
+  [10,"t10c","Post-Scarcity Vault","💎","G",0,1],[10,"t10d","Labor Abolition Engine","🏭","B",0,1],
+  [10,"t10e","Omniscient Oracle Core","🔮","R",0,3],[10,"t10f","Reality Rendering Farm","🖥️","R",1,2],
+  [10,"t10g","Philanthropy Fountain","⛲","G",1,4],[10,"t10h","Godhead Terminal","👁️‍🗨️","S",2,1],
+  [10,"t10i","Time Machine","⏳","Hbr",3,1],[10,"t10j","The Last Cubicle","🕯️","U",3,6],
+];
+const HROLE = { g: "gold", b: "build", r: "research" };
+function footForNodes(n) { return n <= 1 ? [[0, 0]] : n === 2 ? rect(2, 1) : n <= 4 ? rect(2, 2) : rect(3, 2); }
+for (const [tier, key, name, glyph, role, eso, nodes, util] of NEW_FURN) {
+  const d = { name, glyph, tier, h: 11 + tier, nodes, eso, unit: 0, costUnit: Math.round((0.9 + tier * 0.16) * 100) / 100, tag: "neutral" };
+  if (util) d.util = util;
+  if (role === "G") d.unit = Math.round((0.7 + tier * 0.15) * 100) / 100;
+  else if (role === "B") d.tag = "build";
+  else if (role === "R") d.tag = "brain";
+  else if (role === "S") d.soul = Math.round((0.4 + tier * 0.25) * 100) / 100;
+  else if (role === "U") d.role = "utility";
+  else if (role[0] === "H") { d.hybrid = true; d.roles = role.slice(1).split("").map((c) => HROLE[c]); d.unit = d.roles.includes("gold") ? Math.round((0.7 + tier * 0.15) * 100) / 100 : 0; }
+  if (nodes > 1) d.foot = footForNodes(nodes);
+  FURNITURE[key] = d;
+}
+
 export const FURNITURE_ORDER = Object.keys(FURNITURE).sort((a, b) => FURNITURE[a].tier - FURNITURE[b].tier);
 
 export function countOfType(shared, type) { return Object.values(shared.furniture).filter((f) => f.type === type).length; }
@@ -351,7 +435,7 @@ const FOOTPRINT = {
   singularity: rect(3, 2), realitypress: rect(3, 2),
   ldesk: [[0, 0], [1, 0], [0, 1]], // L-shaped desk
 };
-export function footprintOf(type) { return FOOTPRINT[type] || [[0, 0]]; }
+export function footprintOf(type) { const d = FURNITURE[type]; return (d && d.foot) || FOOTPRINT[type] || [[0, 0]]; }
 export function footprintCells(type, ax, ay, rot = 0) {
   return rotateCells(footprintOf(type), rot).map(([x, y]) => [ax + x, ay + y]);
 }
@@ -400,7 +484,15 @@ export function siteAnchorAt(shared, gx, gy) {
 // Flat bonuses mounted on a surface furniture's tiles. NOT multipliers (that's
 // furniture's job). Magnitude scales with the mod's own tier so it stays useful.
 const SURFACE = new Set(["snacktable", "workbench", "pingpong", "toolchest", "espresso", "standdesk", "ldesk", "printer3d", "researchterm", "robotarm", "nanoforge", "fabricator"]);
-export function hasSurface(type) { return SURFACE.has(type); }
+// How many mod/node slots a piece hosts. New pieces carry `nodes`; legacy
+// SURFACE pieces default to their footprint tile count.
+export function nodeCap(type) {
+  const d = FURNITURE[type]; if (!d) return 0;
+  if (typeof d.nodes === "number") return d.nodes;
+  return SURFACE.has(type) ? footprintOf(type).length : 0;
+}
+export function hasSurface(type) { return nodeCap(type) > 0; }
+export function utilOf(type) { const d = FURNITURE[type]; return d && d.util; }
 
 export const MODS = {
   plant: { name: "Desk Plant", glyph: "🪴", kind: "income", tier: 1, unit: 6, costUnit: 0.5 },
@@ -883,7 +975,7 @@ export const ESO_NAME = ["Mundane", "Curious", "Uncanny", "Eldritch"];
 const ESO_ITEM = { focusvisor: 1, mustachewax: 1, goldstapler: 1, ouija: 1, thirdeye: 2, neurallace: 2, antigravboots: 2, ritualrobes: 2, crown: 2, timewatch: 3, hivemind: 3, sentienttie: 3, ringbinder: 3, infinitybag: 3 };
 const ESO_FURN = { quantumboard: 1, obelisk: 1, fabricator: 1, aicluster: 2, oracle: 2, singularity: 2 };
 export function esoOfItem(type) { return ESO_ITEM[type] || 0; }
-export function esoOfFurniture(type) { return ESO_FURN[type] || 0; }
+export function esoOfFurniture(type) { const d = FURNITURE[type]; return (d && d.eso) || ESO_FURN[type] || 0; }
 
 // "Esoteric affinity" trait lowers every soul threshold, so you ascend on less.
 export function esoThresholds(me) {

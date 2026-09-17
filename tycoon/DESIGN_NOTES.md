@@ -19,6 +19,28 @@ These are the source of truth for planned work; read this before picking up
   "+4.5 build power"). Verified the doubling curve, the 1.5× on the signature
   only, the name showing just the signature, and the Locker picker.
 
+## 2026-09-17 — +100 furniture (the proposal), node capacity system — SHIPPED
+Implemented all 100 pieces from FURNITURE_PROPOSAL.md as a data-driven expansion
+(`NEW_FURN` spec → generated `FURNITURE` entries, keys `t1a`…`t10j`). 125 pieces
+total now. Each piece carries `role`/`tag`, `eso`, `nodes`, and a footprint
+derived from node count. Wiring:
+- **Node capacity.** New `nodeCap(type)` (per-piece `nodes`, legacy pieces =
+  footprint tiles); `hasSurface = nodeCap>0`; `tryPlaceMod` rejects once a
+  piece's slots are full. Beds have many slots + low output; monoliths have 0.
+- **Roles** resolve via `roleOf` (added an explicit `role:"utility"` override);
+  soul pieces via `soul`, hybrids via `hybrid`+`roles`, single-role otherwise.
+  `esoOfFurniture`/`footprintOf` read the per-piece `eso`/`foot`.
+- **Rendering** falls back to the role-tinted `genericBox` (colored box + emoji)
+  for the new pieces — clean and readable; custom models can come later.
+- **Utility auras** (2 wired now): `util:"magnet"` (Recycling/Drone/Intern) runs
+  the loot-vacuum for players standing by it; `util:"repair"` (Mop/Cooling Fan)
+  has the host slowly un-break nearby rat-mauled furniture. Other utility pieces
+  are node beds. Verified 125-piece catalog, roles/eso/nodes/foot, cap
+  enforcement, single-role production, hybrids paying both halves, and rendering.
+
+Still to come (this batch): **conveyor belts** (placeable/rotatable, move
+entities + loot) and **traps** (kill on step, limited uses, upgradeable).
+
 ## 2026-09-17 — Kill native pinch-zoom for real + two-finger pan — SHIPPED
 The earlier "remove pinch" only stopped the game's own pinch-zoom handler; the
 BROWSER still pinch-zoomed the page (esp. over the DOM UI, and iOS Safari ignores
