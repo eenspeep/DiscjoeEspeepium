@@ -7,7 +7,7 @@ import { now, uid, clamp, hash } from "./util.js";
 import { defaultLook, normalizeLook } from "./appearance.js";
 import {
   income, FURNITURE, FURNITURE_ORDER, furnitureBuyCost, upgradeCost,
-  roomCost, canAddRoom, nextRoom, floorBounds, isWalkable, inHall, walkableSet, isProtected,
+  roomCost, canAddRoom, nextRoom, floorBounds, isWalkable, walkableSet, isProtected,
   buildStats, SPECIALTIES, ADJECTIVES,
   ITEMS, ITEM_SLOTS, firstFit, fitsAt, itemCells, bagGrid,
   weekStartFor, everyoneVoted, tallyVotes, proposalById, PROPOSALS,
@@ -168,6 +168,16 @@ function freeTileNear(gx, gy) {
   return { x: gx, y: gy };
 }
 function centerMe() { const r0 = state.shared.rooms[0]; state.me.pos = freeTileNear(r0.x + Math.floor(r0.w / 2), r0.y + Math.floor(r0.h / 2)); }
+
+// "I'm wedged." Escape hatch: warp to a free floor tile at the office center
+// (spawn), which is always open. Personal only, no shared change.
+export function unstick() {
+  if (!state.me || !state.me.created) return { ok: false };
+  centerMe();
+  state.me.moving = false;
+  state.meDirty = true; saveMe(); notify();
+  return { ok: true };
+}
 
 // ---- shared ---------------------------------------------------------------
 
@@ -587,9 +597,9 @@ export function tryBuyTile(gx, gy) {
 
 export function tryPlaceDoor(gx, gy) {
   const s = state.shared, key = `${gx},${gy}`;
-  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand closer to the hallway." };
+  if (!withinReach(state.me, gx, gy)) return { ok: false, why: "Too far — stand next to the tile." };
   if (currentTier(s) < TUNING.doorTier) return { ok: false, why: "Doors unlock at research Tier " + TUNING.doorTier + "." };
-  if (!inHall(s, gx, gy)) return { ok: false, why: "Doors go in hallways." };
+  if (!isWalkable(s, gx, gy)) return { ok: false, why: "Doors go on floor tiles." };
   if (s.doors[key]) return { ok: false, why: "There's already a door there." };
   if (s.furniture[key] || s.sites[key]) return { ok: false, why: "That tile is occupied." };
   if (state.me.credits < TUNING.doorCost) return { ok: false, why: "Not enough credits." };
@@ -690,8 +700,9 @@ export function receiveAttack(fromName) {
     return { blocked: true, shield: name };
   }
   const coins = Math.floor(me.credits || 0);
+  const victimName = me.created ? me.name : "someone";   // killMe resets state.me, so grab it now
   killMe(fromName);
-  return { killed: true, coins };
+  return { killed: true, coins, name: victimName };
 }
 
 // Wipe this character (no respawn — you remake). Drops all gear where you fell.

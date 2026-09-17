@@ -154,7 +154,7 @@ function renderHud() {
       el("button", { class: "btn" + (openView === "shop" ? " alert" : ""), onclick: toggleShop }, ["🛒 Shop"]),
       el("button", { class: "btn", onclick: toggleLocker }, ["Locker"]),
       el("button", { class: "btn" + (voting ? " alert" : ""), onclick: togglePot }, [voting ? "Vote!" : "Team Pot"]),
-      el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · Space jump · Q attack (need a weapon in hand) · walk into someone to shove them · click a 📦 to grab loot · stand by furniture to use it"), title: "Help" }, ["?"]),
+      el("button", { class: "btn ghost", onclick: () => flash("WASD/click to walk · Space jump · Q attack (need a weapon in hand) · U unstick (warp to center) · walk into someone to shove them · click a 📦 to grab loot · stand by furniture to use it"), title: "Help" }, ["?"]),
     ])
   );
 }
@@ -195,7 +195,7 @@ function shopRow(glyph, name, meta, price, afford, onclick, extraClass = "") {
 }
 function takeFurniture(type) { setBuild(type); flash("Holding " + FURNITURE[type].name + " — click a tile within reach. R rotates, Put Away to drop."); closePanel(); renderBuildbar(); }
 function takeMod(type) { setBuildMod(type); flash("Holding " + MODS[type].name + " — click a desk/table surface within reach."); closePanel(); renderBuildbar(); }
-function takeDoor() { setBuildDoor(true); flash("Holding a door — click a hallway tile within reach."); closePanel(); renderBuildbar(); }
+function takeDoor() { setBuildDoor(true); flash("Holding a door — click any floor tile within reach."); closePanel(); renderBuildbar(); }
 function takeWall(type) { setBuildWall(type); flash("Holding " + WALL_DECOR[type].name + " — aim at a wall within reach and click."); closePanel(); renderBuildbar(); }
 function takeExpand() { setBuildExpand(true); flash("Expand mode — walk to your office edge and click the glowing fog to claim floor."); closePanel(); renderBuildbar(); }
 
@@ -209,7 +209,7 @@ function renderShop() {
     ? shopRow("🧭", "Expand Floor", "hold it, then click glowing fog at your edge", tileCost(s), me.credits >= tileCost(s), takeExpand)
     : el("div", { class: "shop-row locked", text: "🏢 Office is at max size" }));
   kids.push(currentTier(s) >= TUNING.doorTier
-    ? shopRow("🚪", "Door", "install in a hallway, lock it later", TUNING.doorCost, me.credits >= TUNING.doorCost, takeDoor)
+    ? shopRow("🚪", "Door", "install on any floor tile, lock it later", TUNING.doorCost, me.credits >= TUNING.doorCost, takeDoor)
     : el("div", { class: "shop-row locked", text: "🔒 Door — unlocks at research Tier " + TUNING.doorTier }));
 
   // Node mods
