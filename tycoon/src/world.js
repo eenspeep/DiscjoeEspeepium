@@ -318,17 +318,35 @@ function updateMe(dt) {
 
   const f = state.shared.floor, walk = walkableSet(state.shared), blocked = blockedTiles(state.shared), ents = entityTileSet();
   const doors = state.shared.doors || {};
+  const jumping = now() < (state.jumpPassUntil || 0);
   const solid = (gx, gy) => {
     const k = gx + "," + gy;
-    if (!walk.has(k) || blocked.has(k) || ents.has(k)) return true;
+    if (!walk.has(k) || ents.has(k)) return true;   // void/wall and people always stop you
     const d = doors[k];
-    return !!(d && !doorPassable(d, k, state.me.id, unlockedDoors));
+    if (d && !doorPassable(d, k, state.me.id, unlockedDoors)) return true;
+    if (blocked.has(k)) {
+      // mid-jump you can glide through a single furniture/site piece (never Enzo)
+      if (jumping && !isEnzoTile(state.shared, gx, gy)) {
+        const fk = furnitureAnchorAt(state.shared, gx, gy) || siteAnchorAt(state.shared, gx, gy);
+        if (fk && (!state.jumpPassedKey || state.jumpPassedKey === fk)) return false;
+      }
+      return true;
+    }
+    return false;
   };
   let nx = me.pos.x + vx, ny = me.pos.y + vy, movedX = vx !== 0, movedY = vy !== 0;
   if (vx !== 0 && solid(Math.round(nx), Math.round(me.pos.y))) { nx = me.pos.x; movedX = false; }
   if (vy !== 0 && solid(Math.round(nx), Math.round(ny))) { ny = me.pos.y; movedY = false; }
   me.pos.x = clamp(nx, f.x, f.x + f.w - 1);
   me.pos.y = clamp(ny, f.y, f.y + f.h - 1);
+  // the first furniture/site tile you land on becomes your one allowed pass-through
+  if (jumping) {
+    const rx = Math.round(me.pos.x), ry = Math.round(me.pos.y);
+    if (!isEnzoTile(state.shared, rx, ry)) {
+      const fk = furnitureAnchorAt(state.shared, rx, ry) || siteAnchorAt(state.shared, rx, ry);
+      if (fk) state.jumpPassedKey = fk;
+    }
+  }
   if (target && !movedX && !movedY) target = null; // stuck against something
   me.moving = want && (movedX || movedY);
 }
