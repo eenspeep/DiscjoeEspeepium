@@ -819,6 +819,27 @@ function mDesk(g) {
   if (g.type === "workbench") { ctx.strokeStyle = "#c9772f"; ctx.lineWidth = 2 * Z; ctx.beginPath(); ctx.moveTo(c.x - 6 * Z, c.y); ctx.lineTo(c.x + 2 * Z, c.y - 5 * Z); ctx.stroke(); ctx.fillStyle = "#8a939f"; ctx.beginPath(); ctx.arc(c.x + 5 * Z, c.y - 1 * Z, 2.2 * Z, 0, 7); ctx.fill(); }
   else { ctx.fillStyle = "#f4f6fa"; ctx.fillRect(c.x - 4 * Z, c.y - 3 * Z, 8 * Z, 5 * Z); ctx.strokeStyle = "#9aa3af"; ctx.lineWidth = 0.8 * Z; ctx.strokeRect(c.x - 4 * Z, c.y - 3 * Z, 8 * Z, 5 * Z); }
 }
+// L-shaped desk: draw the two arms as separate desk boxes so it reads as an L,
+// not a filled 2x2 square. Works for any rotation because it uses the actual
+// occupied cells: the corner cell is the one orthogonally adjacent to both ends.
+function mLDesk(g) {
+  const bodyH = g.def.h * 0.7 * g.lvl, cells = g.cells || [];
+  if (cells.length < 3) return mDesk(g);   // safety: fall back to the box
+  const adj = (a, b) => Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) === 1;
+  let corner = cells[0], ends = cells.slice(1);
+  for (const c of cells) { const rest = cells.filter((o) => o !== c); if (rest.length === 2 && rest.every((o) => adj(c, o))) { corner = c; ends = rest; } }
+  const arm = (a, b) => {
+    const g0x = Math.min(a[0], b[0]) - 0.5 + 0.04, g0y = Math.min(a[1], b[1]) - 0.5 + 0.04;
+    const g1x = Math.max(a[0], b[0]) + 0.5 - 0.04, g1y = Math.max(a[1], b[1]) + 0.5 - 0.04;
+    return box(g0x, g0y, g1x, g1y, 0, bodyH, g.tint);
+  };
+  // draw the arm that's further back first so the front arm sits on top
+  const pair = [ends[0], ends[1]].sort((p, q) => (p[0] + p[1]) - (q[0] + q[1]));
+  arm(corner, pair[0]); const front = arm(corner, pair[1]);
+  const Z = camera.zoom, c = { x: front.cxTop, y: front.cyTop };   // a notepad on the near arm
+  ctx.fillStyle = "#f4f6fa"; ctx.fillRect(c.x - 4 * Z, c.y - 3 * Z, 8 * Z, 5 * Z);
+  ctx.strokeStyle = "#9aa3af"; ctx.lineWidth = 0.8 * Z; ctx.strokeRect(c.x - 4 * Z, c.y - 3 * Z, 8 * Z, 5 * Z);
+}
 function mDeskMon(g) {
   const bodyH = g.def.h * 0.55 * g.lvl;
   box(g.g0x, g.g0y, g.g1x, g.g1y, 0, bodyH, g.tint);
@@ -917,7 +938,7 @@ function mMotel(g) {
 const FURN_ART = {
   snacktable: mTable, pingpong: mTable, espresso: mTable,
   chair: mChair,
-  workbench: mDesk, ldesk: mDesk,
+  workbench: mDesk, ldesk: mLDesk,
   standdesk: mDeskMon, researchterm: mDeskMon,
   toolchest: mChest,
   whiteboard: mBoard, quantumboard: mBoard,
@@ -963,6 +984,7 @@ function drawFurniture(ax, ay, f, selected, using) {
     area, tall: 0.95 + 0.16 * area,   // taller bodies for bigger footprints (so 2×2 machines aren't slabs)
     g0x: minX - 0.5 + ins, g0y: minY - 0.5 + ins, g1x: maxX + 0.5 - ins, g1y: maxY + 0.5 - ins,
     cx: (minX + maxX) / 2, cy: (minY + maxY) / 2,
+    cells,   // actual occupied cells, for pieces (like the L-desk) that aren't a filled rectangle
   };
   ctx.globalAlpha = broken ? 0.55 : 1;
   (FURN_ART[f.type] || genericBox)(g);

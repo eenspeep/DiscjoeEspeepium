@@ -4,6 +4,20 @@ Owner-requested directions to implement in future sessions. Newest first.
 These are the source of truth for planned work; read this before picking up
 "next feature" tasks.
 
+## 2026-09-17 — Build completion works off-host + L-desk renders L — SHIPPED
+- **Sites never finishing (e.g. the altar "goes over the max and never builds").**
+  Completion was gated on `state.isHost`, so a site's progress accrued past its
+  work total but never converted to furniture unless you were the authoritative
+  host. Now completion is an idempotent `furnDone` op: whoever is standing at a
+  site whose progress passed its work emits it, it applies locally at once and
+  relays to the host, and `applyOp` no-ops if the furniture already exists (so no
+  double-build). Verified a site completes with `isHost=false`.
+- **L-desk drew as a 2x2 square.** Its footprint was already L-shaped for
+  collision, but the renderer built a filled bounding box. Added `mLDesk`, which
+  draws the two arms as separate desk boxes off the corner cell (found as the
+  cell orthogonally adjacent to both ends), so it reads as an L at any rotation.
+  `drawFurniture` now passes the real occupied `cells` to the art function.
+
 ## 2026-09-17 — Stable connection id (duplicate Joeys + selling) — SHIPPED
 Two symptoms, one cause. The connection id (`net.myId`) was a fresh `uid()` every
 page load. On refresh your old id lingered as a ghost peer (you appeared twice)
